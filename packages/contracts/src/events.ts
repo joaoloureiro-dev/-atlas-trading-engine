@@ -25,6 +25,14 @@ export interface AtlasEvent<TPayload = unknown> {
 
     tenantId: string;
 
+    /**
+     * User responsible for the action when the event
+     * originated from a user interaction.
+     *
+     * System-generated events may not have an actor.
+     */
+    actorUserId?: string;
+
     correlationId: string;
     causationId?: string;
 

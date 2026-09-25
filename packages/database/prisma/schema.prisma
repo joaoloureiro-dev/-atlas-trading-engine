@@ -6,6 +6,10 @@ datasource db {
   provider = "postgresql"
 }
 
+// ============================================================
+// ENUMS
+// ============================================================
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -28,6 +32,35 @@ enum IdentityProvider {
   PRIVY
 }
 
+enum BrokerType {
+  BROKER
+  EXCHANGE
+}
+
+enum BrokerConnectionStatus {
+  PENDING
+  ACTIVE
+  DEGRADED
+  DISCONNECTED
+  REVOKED
+}
+
+enum BrokerAccountStatus {
+  ACTIVE
+  RESTRICTED
+  DISABLED
+}
+
+enum TradingMode {
+  PAPER
+  SHADOW
+  LIVE
+}
+
+// ============================================================
+// IDENTITY & MULTI-TENANCY
+// ============================================================
+
 model User {
   id        String     @id @default(uuid()) @db.Uuid
   status    UserStatus @default(ACTIVE)
@@ -48,7 +81,9 @@ model Tenant {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  memberships TenantMembership[]
+  memberships       TenantMembership[]
+  brokerConnections BrokerConnection[]
+  brokerAccounts    BrokerAccount[]
 
   @@index([status])
   @@map("tenants")
@@ -86,4 +121,60 @@ model ExternalIdentity {
   @@unique([provider, providerUserId])
   @@index([userId])
   @@map("external_identities")
+}
+
+// ============================================================
+// BROKERS & EXCHANGES
+// ============================================================
+
+model BrokerConnection {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+
+  provider String
+  type     BrokerType
+
+  status BrokerConnectionStatus @default(PENDING)
+
+  // Reference to credentials stored in the secrets infrastructure.
+  // API keys and secrets must NEVER be stored here in plaintext.
+  credentialReference String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  accounts BrokerAccount[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, provider])
+  @@map("broker_connections")
+}
+
+model BrokerAccount {
+  id                 String @id @default(uuid()) @db.Uuid
+  tenantId           String @db.Uuid
+  brokerConnectionId String @db.Uuid
+
+  // Account identifier provided by the broker/exchange.
+  externalAccountId String
+
+  status      BrokerAccountStatus @default(ACTIVE)
+  tradingMode TradingMode         @default(PAPER)
+
+  baseCurrency String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  brokerConnection BrokerConnection @relation(fields: [brokerConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([brokerConnectionId, externalAccountId])
+  @@index([tenantId, status])
+  @@index([tenantId, tradingMode])
+  @@index([tenantId, brokerConnectionId])
+  @@map("broker_accounts")
 }

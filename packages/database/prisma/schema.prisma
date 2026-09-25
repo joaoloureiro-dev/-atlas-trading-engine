@@ -147,6 +147,7 @@ model BrokerConnection {
 
   accounts BrokerAccount[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, status])
   @@index([tenantId, provider])
   @@map("broker_connections")
@@ -157,7 +158,6 @@ model BrokerAccount {
   tenantId           String @db.Uuid
   brokerConnectionId String @db.Uuid
 
-  // Account identifier provided by the broker/exchange.
   externalAccountId String
 
   status      BrokerAccountStatus @default(ACTIVE)
@@ -170,7 +170,7 @@ model BrokerAccount {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  brokerConnection BrokerConnection @relation(fields: [brokerConnectionId], references: [id], onDelete: Cascade)
+  brokerConnection BrokerConnection @relation(fields: [tenantId, brokerConnectionId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([brokerConnectionId, externalAccountId])
   @@index([tenantId, status])

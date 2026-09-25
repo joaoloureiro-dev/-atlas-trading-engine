@@ -21,3 +21,19 @@ layers of defense.
 - Never expose broker secrets through normal database queries.
 - Prefer fail-closed behavior when tenant context is missing or invalid.
 - PostgreSQL RLS must protect tenant-scoped financial tables.
+
+## Row-Level Security
+
+Tenant-scoped tables are protected using PostgreSQL Row-Level Security.
+
+The application must establish the tenant context inside the same database
+transaction used to access tenant-scoped resources.
+
+Tenant context must never be persisted globally on a pooled database
+connection.
+
+RLS is a defense-in-depth mechanism and does not replace application
+authorization.
+
+Cross-tenant relationships must also be protected by database constraints
+where possible.

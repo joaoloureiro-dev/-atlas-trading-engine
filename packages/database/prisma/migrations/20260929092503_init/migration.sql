@@ -137,7 +137,7 @@ ADD CONSTRAINT "broker_accounts_tenantId_brokerConnectionId_fkey" FOREIGN KEY ("
 --
 -- The application must set:
 --
---   app.current_"tenantId"
+--   app.current_tenant_id
 --
 -- inside the database transaction before accessing
 -- tenant-scoped data.
@@ -153,12 +153,12 @@ ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_memberships FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_memberships_isolation ON tenant_memberships USING (
     "tenantId" = NULLIF(
-        current_setting('app.current_"tenantId"', true),
+        current_setting('app.current_tenant_id', true),
         ''
     )::uuid
 ) WITH CHECK (
     "tenantId" = NULLIF(
-        current_setting('app.current_"tenantId"', true),
+        current_setting('app.current_tenant_id', true),
         ''
     )::uuid
 );
@@ -169,12 +169,12 @@ ALTER TABLE broker_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE broker_connections FORCE ROW LEVEL SECURITY;
 CREATE POLICY broker_connections_isolation ON broker_connections USING (
     "tenantId" = NULLIF(
-        current_setting('app.current_"tenantId"', true),
+        current_setting('app.current_tenant_id', true),
         ''
     )::uuid
 ) WITH CHECK (
     "tenantId" = NULLIF(
-        current_setting('app.current_"tenantId"', true),
+        current_setting('app.current_tenant_id', true),
         ''
     )::uuid
 );
@@ -185,22 +185,12 @@ ALTER TABLE broker_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE broker_accounts FORCE ROW LEVEL SECURITY;
 CREATE POLICY broker_accounts_isolation ON broker_accounts USING (
     "tenantId" = NULLIF(
-        current_setting('app.current_"tenantId"', true),
+        current_setting('app.current_tenant_id', true),
         ''
     )::uuid
 ) WITH CHECK (
     "tenantId" = NULLIF(
-        current_setting('app.current_"tenantId"', true),
+        current_setting('app.current_tenant_id', true),
         ''
     )::uuid
 );
--- ============================================================
--- APPLICATION ROLE PRIVILEGES
--- ============================================================
-GRANT USAGE ON SCHEMA public TO atlas_app;
-GRANT SELECT,
-    INSERT,
-    UPDATE,
-    DELETE ON ALL TABLES IN SCHEMA public TO atlas_app;
-GRANT USAGE,
-    SELECT ON ALL SEQUENCES IN SCHEMA public TO atlas_app;

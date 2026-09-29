@@ -1,4 +1,4 @@
--- ============================================================
+﻿-- ============================================================
 -- ATLAS ROW-LEVEL SECURITY
 -- ============================================================
 --
@@ -7,7 +7,7 @@
 --
 -- The application must set:
 --
---   app.current_tenant_id
+--   app.current_"tenantId"
 --
 -- inside the database transaction before accessing
 -- tenant-scoped data.
@@ -22,13 +22,13 @@
 ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_memberships FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_memberships_isolation ON tenant_memberships USING (
-    tenant_id = NULLIF(
-        current_setting('app.current_tenant_id', true),
+    "tenantId" = NULLIF(
+        current_setting('app.current_"tenantId"', true),
         ''
     )::uuid
 ) WITH CHECK (
-    tenant_id = NULLIF(
-        current_setting('app.current_tenant_id', true),
+    "tenantId" = NULLIF(
+        current_setting('app.current_"tenantId"', true),
         ''
     )::uuid
 );
@@ -38,13 +38,13 @@ CREATE POLICY tenant_memberships_isolation ON tenant_memberships USING (
 ALTER TABLE broker_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE broker_connections FORCE ROW LEVEL SECURITY;
 CREATE POLICY broker_connections_isolation ON broker_connections USING (
-    tenant_id = NULLIF(
-        current_setting('app.current_tenant_id', true),
+    "tenantId" = NULLIF(
+        current_setting('app.current_"tenantId"', true),
         ''
     )::uuid
 ) WITH CHECK (
-    tenant_id = NULLIF(
-        current_setting('app.current_tenant_id', true),
+    "tenantId" = NULLIF(
+        current_setting('app.current_"tenantId"', true),
         ''
     )::uuid
 );
@@ -54,13 +54,13 @@ CREATE POLICY broker_connections_isolation ON broker_connections USING (
 ALTER TABLE broker_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE broker_accounts FORCE ROW LEVEL SECURITY;
 CREATE POLICY broker_accounts_isolation ON broker_accounts USING (
-    tenant_id = NULLIF(
-        current_setting('app.current_tenant_id', true),
+    "tenantId" = NULLIF(
+        current_setting('app.current_"tenantId"', true),
         ''
     )::uuid
 ) WITH CHECK (
-    tenant_id = NULLIF(
-        current_setting('app.current_tenant_id', true),
+    "tenantId" = NULLIF(
+        current_setting('app.current_"tenantId"', true),
         ''
     )::uuid
 );

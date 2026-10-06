@@ -84,6 +84,8 @@ model Tenant {
   memberships       TenantMembership[]
   brokerConnections BrokerConnection[]
   brokerAccounts    BrokerAccount[]
+  portfolios        Portfolio[]
+  positions         PortfolioPosition[]
 
   @@index([status])
   @@map("tenants")
@@ -177,4 +179,57 @@ model BrokerAccount {
   @@index([tenantId, tradingMode])
   @@index([tenantId, brokerConnectionId])
   @@map("broker_accounts")
+}
+
+// ============================================================
+// PORTFOLIOS
+// ============================================================
+
+model Portfolio {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+
+  name         String
+  baseCurrency String
+  tradingMode  TradingMode @default(PAPER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  positions PortfolioPosition[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, tradingMode])
+  @@index([tenantId, name])
+  @@map("portfolios")
+}
+
+model PortfolioPosition {
+  id          String @id @default(uuid()) @db.Uuid
+  tenantId    String @db.Uuid
+  portfolioId String @db.Uuid
+
+  market String
+  symbol String
+
+  quantity          Decimal  @db.Decimal(36, 18)
+  averageEntryPrice Decimal  @db.Decimal(36, 18)
+  currentPrice      Decimal? @db.Decimal(36, 18)
+
+  unrealizedPnl Decimal? @db.Decimal(36, 18)
+  realizedPnl   Decimal  @default(0) @db.Decimal(36, 18)
+
+  openedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  portfolio Portfolio @relation(fields: [tenantId, portfolioId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, portfolioId])
+  @@index([tenantId, market])
+  @@index([tenantId, symbol])
+  @@map("portfolio_positions")
 }

@@ -3,9 +3,12 @@ import type {
     PortfolioPosition,
 } from "@atlas/contracts";
 
+import type {
+    PortfolioConcentration,
+} from "@atlas/contracts";
+
 import {
     calculatePortfolioConcentration,
-    type PortfolioConcentration,
 } from "./concentration.js";
 import {
     calculatePortfolioExposure,

@@ -1,25 +1,8 @@
 import type {
     MarketType,
+    PortfolioConcentration,
     PortfolioPosition,
 } from "@atlas/contracts";
-
-export interface MarketExposure {
-    market: MarketType;
-    exposure: number;
-    percentageOfGrossExposure: number;
-}
-
-export interface PortfolioConcentration {
-    tenantId: string;
-    portfolioId: string;
-
-    grossExposure: number;
-    markets: MarketExposure[];
-
-    largestMarket?: MarketExposure;
-
-    calculatedAt: string;
-}
 
 export interface CalculatePortfolioConcentrationInput {
     tenantId: string;
@@ -66,7 +49,7 @@ export function calculatePortfolioConcentration(
         0,
     );
 
-    const markets: MarketExposure[] = Array.from(
+    const markets = Array.from(
         exposureByMarket.entries(),
     )
         .map(([market, exposure]) => ({

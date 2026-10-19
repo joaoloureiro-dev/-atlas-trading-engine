@@ -47,6 +47,7 @@ const limits: RiskLimits = {
     maxDailyLoss: 500,
     maxDrawdownPercentage: 20,
     maxMarketConcentrationPercentage: 50,
+    maxOpenPositions: 10,
 
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -62,6 +63,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("APPROVED");
@@ -83,6 +85,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: -500,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -100,6 +103,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 20,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -117,6 +121,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -134,6 +139,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 5_000,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -158,6 +164,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("APPROVED");
@@ -183,6 +190,7 @@ describe("evaluateRisk", () => {
                 currentNetExposure: 0,
                 currentDailyPnl: 0,
                 currentDrawdownPercentage: 0,
+                currentOpenPositions: 0,
             }),
         ).toThrow(
             "Risk evaluation received a proposal from another tenant.",
@@ -201,6 +209,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -223,6 +232,7 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -245,11 +255,48 @@ describe("evaluateRisk", () => {
             currentNetExposure: 0,
             currentDailyPnl: 0,
             currentDrawdownPercentage: 0,
+            currentOpenPositions: 0,
         });
 
         expect(result.status).toBe("REJECTED");
         expect(result.reasons).toContain(
             "Short trade invalidation price must be above entry price.",
+        );
+    });
+
+    it("rejects when maximum number of open positions is reached", () => {
+        const result = evaluateRisk({
+            decisionId: "decision-11",
+            proposal,
+            limits,
+            currentGrossExposure: 0,
+            currentNetExposure: 0,
+            currentDailyPnl: 0,
+            currentDrawdownPercentage: 0,
+            currentOpenPositions: 10,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Maximum number of open positions reached.",
+        );
+    });
+
+    it("rejects an invalid open position count", () => {
+        const result = evaluateRisk({
+            decisionId: "decision-12",
+            proposal,
+            limits,
+            currentGrossExposure: 0,
+            currentNetExposure: 0,
+            currentDailyPnl: 0,
+            currentDrawdownPercentage: 0,
+            currentOpenPositions: -1,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Current open position count must be a valid non-negative integer.",
         );
     });
 });

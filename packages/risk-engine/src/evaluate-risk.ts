@@ -15,6 +15,8 @@ export interface EvaluateRiskInput {
 
     currentDailyPnl: number;
     currentDrawdownPercentage: number;
+
+    currentOpenPositions: number;
 }
 
 export function evaluateRisk(
@@ -28,6 +30,7 @@ export function evaluateRisk(
         currentNetExposure,
         currentDailyPnl,
         currentDrawdownPercentage,
+        currentOpenPositions,
     } = input;
 
     const reject = (
@@ -56,6 +59,24 @@ export function evaluateRisk(
     if (proposal.tenantId !== limits.tenantId) {
         throw new Error(
             "Risk evaluation received a proposal from another tenant.",
+        );
+    }
+
+    if (
+        !Number.isInteger(currentOpenPositions) ||
+        currentOpenPositions < 0
+    ) {
+        return reject(
+            "Current open position count must be a valid non-negative integer.",
+        );
+    }
+
+    if (
+        limits.maxOpenPositions !== undefined &&
+        currentOpenPositions >= limits.maxOpenPositions
+    ) {
+        return reject(
+            "Maximum number of open positions reached.",
         );
     }
 
@@ -103,7 +124,9 @@ export function evaluateRisk(
         !Number.isFinite(proposal.invalidationPrice) ||
         proposal.invalidationPrice <= 0
     ) {
-        return reject("A valid invalidation price is required.");
+        return reject(
+            "A valid invalidation price is required.",
+        );
     }
 
     if (

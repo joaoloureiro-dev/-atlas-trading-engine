@@ -135,4 +135,99 @@ describe("evaluateConcentration", () => {
             "Concentration snapshot belongs to another tenant.",
         );
     });
+
+    it("rejects concentration snapshots from another portfolio", () => {
+        expect(() =>
+            evaluateConcentration({
+                proposal,
+                limits,
+                concentration: {
+                    ...concentration,
+                    portfolioId: "portfolio-2",
+                },
+                proposedCapital: 200,
+            }),
+        ).toThrow(
+            "Concentration snapshot belongs to another portfolio.",
+        );
+    });
+
+    it("rejects a non-finite concentration limit", () => {
+        const result = evaluateConcentration({
+            proposal,
+            limits: {
+                ...limits,
+                maxMarketConcentrationPercentage: NaN,
+            },
+            concentration,
+            proposedCapital: 200,
+        });
+
+        expect(result.approved).toBe(false);
+        expect(result.reason).toBe(
+            "Market concentration limit must be a positive finite number.",
+        );
+    });
+
+    it("rejects a snapshot with a non-finite gross exposure", () => {
+        const result = evaluateConcentration({
+            proposal,
+            limits,
+            concentration: {
+                ...concentration,
+                grossExposure: NaN,
+            },
+            proposedCapital: 200,
+        });
+
+        expect(result.approved).toBe(false);
+        expect(result.reason).toBe(
+            "Concentration snapshot must contain valid non-negative exposures.",
+        );
+    });
+
+    it("rejects a snapshot with a non-finite market exposure", () => {
+        const result = evaluateConcentration({
+            proposal,
+            limits,
+            concentration: {
+                ...concentration,
+                markets: [
+                    {
+                        market: "CRYPTO",
+                        exposure: NaN,
+                        percentageOfGrossExposure: 0,
+                    },
+                ],
+            },
+            proposedCapital: 200,
+        });
+
+        expect(result.approved).toBe(false);
+        expect(result.reason).toBe(
+            "Concentration snapshot must contain valid non-negative exposures.",
+        );
+    });
+
+    it("rejects non-finite market-specific limits", () => {
+        const result = evaluateConcentration({
+            proposal,
+            limits: {
+                ...limits,
+                marketLimits: {
+                    CRYPTO: {
+                        maxExposure: NaN,
+                        maxConcentrationPercentage: 80,
+                    },
+                },
+            },
+            concentration,
+            proposedCapital: 200,
+        });
+
+        expect(result.approved).toBe(false);
+        expect(result.reason).toBe(
+            "Market-specific limits must be valid non-negative numbers.",
+        );
+    });
 });

@@ -47,3 +47,20 @@ export interface PortfolioExposure {
 
     calculatedAt: string;
 }
+export interface MarketExposure {
+    market: MarketType;
+    exposure: number;
+    percentageOfGrossExposure: number;
+}
+
+export interface PortfolioConcentration {
+    tenantId: string;
+    portfolioId: string;
+
+    grossExposure: number;
+    markets: MarketExposure[];
+
+    largestMarket?: MarketExposure;
+
+    calculatedAt: string;
+}

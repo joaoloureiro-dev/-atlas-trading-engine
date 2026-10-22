@@ -38,10 +38,42 @@ export function evaluateConcentration(
         );
     }
 
+    if (concentration.portfolioId !== limits.portfolioId) {
+        throw new Error(
+            "Concentration snapshot belongs to another portfolio.",
+        );
+    }
+
     if (!Number.isFinite(proposedCapital) || proposedCapital <= 0) {
         return {
             approved: false,
             reason: "Proposed capital must be greater than zero.",
+        };
+    }
+
+    // Comparisons against NaN are always false, so invalid inputs must be
+    // rejected explicitly or the limit checks below silently pass.
+    if (
+        !Number.isFinite(limits.maxMarketConcentrationPercentage) ||
+        limits.maxMarketConcentrationPercentage <= 0
+    ) {
+        return {
+            approved: false,
+            reason: "Market concentration limit must be a positive finite number.",
+        };
+    }
+
+    if (
+        !Number.isFinite(concentration.grossExposure) ||
+        concentration.grossExposure < 0 ||
+        !concentration.markets.every(
+            ({ exposure }) =>
+                Number.isFinite(exposure) && exposure >= 0,
+        )
+    ) {
+        return {
+            approved: false,
+            reason: "Concentration snapshot must contain valid non-negative exposures.",
         };
     }
 
@@ -80,6 +112,21 @@ export function evaluateConcentration(
         limits.marketLimits?.[
         proposal.instrument.market
         ];
+
+    if (
+        marketLimit &&
+        (
+            !Number.isFinite(marketLimit.maxExposure) ||
+            marketLimit.maxExposure < 0 ||
+            !Number.isFinite(marketLimit.maxConcentrationPercentage) ||
+            marketLimit.maxConcentrationPercentage < 0
+        )
+    ) {
+        return {
+            approved: false,
+            reason: "Market-specific limits must be valid non-negative numbers.",
+        };
+    }
 
     if (
         marketLimit &&

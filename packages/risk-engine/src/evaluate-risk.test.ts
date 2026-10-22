@@ -299,4 +299,139 @@ describe("evaluateRisk", () => {
             "Current open position count must be a valid non-negative integer.",
         );
     });
+
+    const validState = {
+        currentGrossExposure: 0,
+        currentNetExposure: 0,
+        currentDailyPnl: 0,
+        currentDrawdownPercentage: 0,
+        currentOpenPositions: 0,
+    };
+
+    it.each([
+        ["currentGrossExposure", NaN],
+        ["currentNetExposure", NaN],
+        ["currentDailyPnl", NaN],
+        ["currentDrawdownPercentage", NaN],
+        ["currentGrossExposure", -1],
+        ["currentDrawdownPercentage", -1],
+    ] as const)(
+        "rejects when %s is %s",
+        (field, value) => {
+            const result = evaluateRisk({
+                decisionId: "decision-13",
+                proposal,
+                limits,
+                ...validState,
+                [field]: value,
+            });
+
+            expect(result.status).toBe("REJECTED");
+            expect(result.reasons).toContain(
+                "Current portfolio state must contain valid finite numbers.",
+            );
+        },
+    );
+
+    it.each([
+        ["maxPositionNotional", NaN],
+        ["maxRiskPerTrade", NaN],
+        ["maxGrossExposure", NaN],
+        ["maxNetExposure", NaN],
+        ["maxDailyLoss", NaN],
+        ["maxDrawdownPercentage", NaN],
+        ["maxMarketConcentrationPercentage", NaN],
+        ["maxDailyLoss", -500],
+        ["maxDrawdownPercentage", 0],
+        ["maxGrossExposure", Infinity],
+    ] as const)(
+        "rejects when limit %s is %s",
+        (field, value) => {
+            const result = evaluateRisk({
+                decisionId: "decision-14",
+                proposal,
+                limits: {
+                    ...limits,
+                    [field]: value,
+                },
+                ...validState,
+            });
+
+            expect(result.status).toBe("REJECTED");
+            expect(result.reasons).toContain(
+                "Risk limits must be positive finite numbers.",
+            );
+        },
+    );
+
+    it("rejects an invalid maximum open positions limit", () => {
+        const result = evaluateRisk({
+            decisionId: "decision-15",
+            proposal,
+            limits: {
+                ...limits,
+                maxOpenPositions: NaN,
+            },
+            ...validState,
+            currentOpenPositions: 1_000,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Maximum open positions limit must be a valid non-negative integer.",
+        );
+    });
+
+    it("rejects an expired proposal", () => {
+        const result = evaluateRisk({
+            decisionId: "decision-16",
+            proposal: {
+                ...proposal,
+                expiresAt: new Date(
+                    Date.now() - 1,
+                ).toISOString(),
+            },
+            limits,
+            ...validState,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Trade proposal has expired.",
+        );
+    });
+
+    it("rejects a proposal with an invalid expiry", () => {
+        const result = evaluateRisk({
+            decisionId: "decision-17",
+            proposal: {
+                ...proposal,
+                expiresAt: "not-a-date",
+            },
+            limits,
+            ...validState,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Trade proposal has expired.",
+        );
+    });
+
+    it("caps trade risk at the remaining daily loss allowance", () => {
+        const result = evaluateRisk({
+            decisionId: "decision-18",
+            proposal,
+            limits,
+            ...validState,
+            currentDailyPnl: -490,
+        });
+
+        expect(result.status).toBe("APPROVED");
+
+        // 10 left before the 500 daily loss limit, 5 risk per unit.
+        expect(result.maxLoss).toBe(10);
+        expect(result.approvedQuantity).toBe(2);
+        expect(result.approvedCapital).toBe(200);
+    });
 });

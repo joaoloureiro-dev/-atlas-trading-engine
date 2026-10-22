@@ -62,13 +62,56 @@ export function evaluateRisk(
         );
     }
 
+    const positiveLimits = [
+        limits.maxPositionNotional,
+        limits.maxRiskPerTrade,
+        limits.maxGrossExposure,
+        limits.maxNetExposure,
+        limits.maxDailyLoss,
+        limits.maxDrawdownPercentage,
+        limits.maxMarketConcentrationPercentage,
+    ];
+
+    // Comparisons against NaN are always false, so every value used by a
+    // limit check must be validated first or the check silently passes.
+    if (!positiveLimits.every(isPositiveFinite)) {
+        return reject(
+            "Risk limits must be positive finite numbers.",
+        );
+    }
+
     if (
-        !Number.isInteger(currentOpenPositions) ||
-        currentOpenPositions < 0
+        limits.maxOpenPositions !== undefined &&
+        !isNonNegativeInteger(limits.maxOpenPositions)
     ) {
+        return reject(
+            "Maximum open positions limit must be a valid non-negative integer.",
+        );
+    }
+
+    if (!isNonNegativeInteger(currentOpenPositions)) {
         return reject(
             "Current open position count must be a valid non-negative integer.",
         );
+    }
+
+    if (
+        !Number.isFinite(currentGrossExposure) ||
+        currentGrossExposure < 0 ||
+        !Number.isFinite(currentNetExposure) ||
+        !Number.isFinite(currentDailyPnl) ||
+        !Number.isFinite(currentDrawdownPercentage) ||
+        currentDrawdownPercentage < 0
+    ) {
+        return reject(
+            "Current portfolio state must contain valid finite numbers.",
+        );
+    }
+
+    const expiresAt = Date.parse(proposal.expiresAt);
+
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        return reject("Trade proposal has expired.");
     }
 
     if (
@@ -80,10 +123,7 @@ export function evaluateRisk(
         );
     }
 
-    if (
-        currentDailyPnl <=
-        -Math.abs(limits.maxDailyLoss)
-    ) {
+    if (currentDailyPnl <= -limits.maxDailyLoss) {
         return reject("Maximum daily loss reached.");
     }
 
@@ -157,8 +197,17 @@ export function evaluateRisk(
         );
     }
 
+    // A single trade must not be able to push the day past its loss limit.
+    const remainingDailyLoss =
+        limits.maxDailyLoss + currentDailyPnl;
+
+    const riskBudget = Math.min(
+        limits.maxRiskPerTrade,
+        remainingDailyLoss,
+    );
+
     const quantityByRisk =
-        limits.maxRiskPerTrade / riskPerUnit;
+        riskBudget / riskPerUnit;
 
     const notionalByRisk =
         quantityByRisk * entryPrice;
@@ -226,4 +275,11 @@ export function evaluateRisk(
 
         createdAt: new Date().toISOString(),
     };
+}
+function isPositiveFinite(value: number): boolean {
+    return Number.isFinite(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: number): boolean {
+    return Number.isInteger(value) && value >= 0;
 }

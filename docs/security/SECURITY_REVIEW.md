@@ -14,7 +14,7 @@ Sem segredos reais no histórico git. `.gitignore` cobre `.env*`, chaves e certi
 
 | ID | Severidade | Estado | Resumo |
 |----|-----------|--------|--------|
-| A-01 | Alta | Aberto | `portfolios` / `portfolio_positions` estão no schema sem migração nem RLS |
+| A-01 | Alta | Resolvido (`be410f9`) | `portfolios` / `portfolio_positions` estão no schema sem migração nem RLS |
 | A-02 | Alta | Aberto | Papel `atlas_app` e respetivos GRANTs não estão codificados; superuser ignora RLS |
 | A-03 | Média | Aberto | `users`, `tenants`, `external_identities` sem RLS e acessíveis por `atlas_app` |
 | A-04 | Média | Aberto | `prisma` exportado diretamente permite contornar `withTenantTransaction` |
@@ -23,9 +23,9 @@ Sem segredos reais no histórico git. `.gitignore` cobre `.env*`, chaves e certi
 | A-07 | Média | Aberto | Postgres publicado em `0.0.0.0:5432` com palavra-passe por defeito `change_me` |
 | A-08 | Média | Aberto | Contratos usam `number` para quantidades e preços; a BD usa `Decimal(36,18)` |
 | A-09 | Baixa | Aberto | `sql/rls.sql` está desatualizado (`app.current_"tenantId"`) e diverge da migração |
-| A-10 | Baixa | Aberto | `npm audit`: 4 vulnerabilidades altas na CLI `prisma` (dev; `mysql2`, `deepmerge-ts`) |
+| A-10 | Baixa | Resolvido (revisão #2) | `npm audit`: 4 vulnerabilidades altas na CLI `prisma` (dev; `mysql2`, `deepmerge-ts`) |
 | A-11 | Baixa | Aberto | `.env.example` define `DATABASE_URL` duas vezes |
-| A-12 | Info | Aberto | Sem CI, sem testes de isolamento entre tenants, sem `SECURITY.md` |
+| A-12 | Info | Parcial (há testes unitários; falta CI e testes de RLS) | Sem CI, sem testes de isolamento entre tenants, sem `SECURITY.md` |
 
 ### Detalhe
 
@@ -131,3 +131,53 @@ o papel não é superuser nem tem BYPASSRLS). Falta também um `SECURITY.md`
 3. Antes de integrar brokers ou ordens: A-08, auditoria imutável (append-only) de eventos,
    idempotência garantida na BD (`UNIQUE (tenantId, idempotencyKey)`), gestão de
    segredos (KMS/Vault) e separação de privilégios entre agentes e o executor.
+
+## Revisão #2 — 2026-10-22 (até ao commit `f971068`)
+
+Âmbito: os 13 commits novos (migração de portefólios, portfolio-engine, risk-engine,
+execution-gateway). Achados confirmados com provas de conceito contra `evaluateHardRisk`
+e aplicando as migrações num PostgreSQL temporário.
+
+- A-01 resolvido: a migração `be410f9` cria RLS forçado em `portfolios` e
+  `portfolio_positions`. Verificado: sem contexto não se vê nada, inserir no tenant B a
+  partir do A é bloqueado, e associar uma posição a um portefólio de outro tenant falha
+  pela FK composta.
+- A-10 resolvido: `npm audit` sem vulnerabilidades.
+
+### Achados
+
+| ID | Severidade | Estado | Resumo |
+|----|-----------|--------|--------|
+| R-01 | Alta | Corrigido | Hard risk gate aprovava quando estado ou limites eram `NaN` (fail-open) |
+| R-02 | Alta | Corrigido | Perda máxima por trade não limitada ao restante do limite diário |
+| R-03 | Média | Parcial | Snapshot de concentração de outro portefólio era aceite; `TradeProposal` sem `portfolioId` |
+| R-04 | Média | Parcial | Propostas expiradas aprovadas; `tradingMode` vem da proposta do agente |
+| R-05 | Baixa | Aberto | `portfolio_positions` aceita `market` arbitrário e preços negativos (sem CHECK) |
+| R-06 | Info | Aberto | `execution-gateway` vazio; ainda não há nada para rever |
+
+**R-01.** Todas as verificações tinham a forma "rejeita se `x >= limite`". Como qualquer
+comparação com `NaN` dá `false`, um dado em falta (PnL, drawdown, exposição, limites ou
+`maxOpenPositions`) fazia o trade passar.
+Correção: validar estado e limites com `Number.isFinite` antes de qualquer comparação,
+falhando de forma fechada (fail-closed).
+
+**R-02.** Com o PnL do dia em −990 e um limite diário de 1000, era aprovado um trade com
+`maxLoss` 500. Correção: o orçamento de risco passa a ser
+`min(maxRiskPerTrade, maxDailyLoss + currentDailyPnl)`.
+Pendente: o drawdown não tem a mesma limitação, porque o gate não recebe o equity/peak
+necessário para converter percentagem em capital.
+
+**R-03.** Corrigido: a concentração passa a ter de pertencer a `limits.portfolioId`.
+Pendente: acrescentar `portfolioId` ao `TradeProposal`, verificar a idade do snapshot
+(`calculatedAt`) e usar uma única fonte para a exposição bruta (hoje há
+`currentGrossExposure` e `concentration.grossExposure`).
+
+**R-04.** Corrigido: propostas expiradas ou com `expiresAt` inválido são rejeitadas.
+Pendente: o `tradingMode` deve vir da configuração do portefólio ou da conta e não da
+proposta do agente; um agente não deve poder pedir LIVE.
+
+**R-05.** Tornar `market` um enum e acrescentar `CHECK` para preços não negativos.
+
+Notas: as contas do gate continuam em `number` (A-08); com floats, o `maxLoss` pode
+exceder o orçamento por um erro de arredondamento mínimo. O `execution-gateway` deve
+aceitar apenas `RiskDecision` aprovadas, verificadas e idempotentes.

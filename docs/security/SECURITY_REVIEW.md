@@ -20,11 +20,11 @@ Sem segredos reais no histórico git. `.gitignore` cobre `.env*`, chaves e certi
 | A-04 | Média | Aberto | `prisma` exportado diretamente permite contornar `withTenantTransaction` |
 | A-05 | Média | Aberto | `withTenantTransaction` não verifica a pertença do `userId` ao `tenantId` |
 | A-06 | Média | Aberto | RLS só isola o tenant: um utilizador do tenant pode alterar papéis (escalada para OWNER) |
-| A-07 | Média | Aberto | Postgres publicado em `0.0.0.0:5432` com palavra-passe por defeito `change_me` |
+| A-07 | Média | Resolvido (revisão #3) | Postgres publicado em `0.0.0.0:5432` com palavra-passe por defeito `change_me` |
 | A-08 | Média | Aberto | Contratos usam `number` para quantidades e preços; a BD usa `Decimal(36,18)` |
-| A-09 | Baixa | Aberto | `sql/rls.sql` está desatualizado (`app.current_"tenantId"`) e diverge da migração |
+| A-09 | Baixa | Resolvido (revisão #3) | `sql/rls.sql` está desatualizado (`app.current_"tenantId"`) e diverge da migração |
 | A-10 | Baixa | Resolvido (revisão #2) | `npm audit`: 4 vulnerabilidades altas na CLI `prisma` (dev; `mysql2`, `deepmerge-ts`) |
-| A-11 | Baixa | Aberto | `.env.example` define `DATABASE_URL` duas vezes |
+| A-11 | Baixa | Resolvido (revisão #3) | `.env.example` define `DATABASE_URL` duas vezes |
 | A-12 | Info | Parcial (CI com build, typecheck, testes e audit; faltam testes de RLS e secret scanning) | Sem CI, sem testes de isolamento entre tenants, sem `SECURITY.md` |
 
 ### Detalhe
@@ -150,10 +150,10 @@ e aplicando as migrações num PostgreSQL temporário.
 |----|-----------|--------|--------|
 | R-01 | Alta | Corrigido | Hard risk gate aprovava quando estado ou limites eram `NaN` (fail-open) |
 | R-02 | Alta | Corrigido | Perda máxima por trade não limitada ao restante do limite diário |
-| R-03 | Média | Parcial | Snapshot de concentração de outro portefólio era aceite; `TradeProposal` sem `portfolioId` |
-| R-04 | Média | Parcial | Propostas expiradas aprovadas; `tradingMode` vem da proposta do agente |
+| R-03 | Média | Resolvido (revisão #3) | Snapshot de concentração de outro portefólio era aceite; `TradeProposal` sem `portfolioId` |
+| R-04 | Média | Resolvido (revisão #3) | Propostas expiradas aprovadas; `tradingMode` vem da proposta do agente |
 | R-05 | Baixa | Aberto | `portfolio_positions` aceita `market` arbitrário e preços negativos (sem CHECK) |
-| R-06 | Info | Aberto | `execution-gateway` vazio; ainda não há nada para rever |
+| R-06 | Info | Revisto (revisão #3) | `execution-gateway` vazio; ainda não há nada para rever |
 
 **R-01.** Todas as verificações tinham a forma "rejeita se `x >= limite`". Como qualquer
 comparação com `NaN` dá `false`, um dado em falta (PnL, drawdown, exposição, limites ou
@@ -181,3 +181,77 @@ proposta do agente; um agente não deve poder pedir LIVE.
 Notas: as contas do gate continuam em `number` (A-08); com floats, o `maxLoss` pode
 exceder o orçamento por um erro de arredondamento mínimo. O `execution-gateway` deve
 aceitar apenas `RiskDecision` aprovadas, verificadas e idempotentes.
+
+## Revisão #3 — 2026-10-24 (até ao commit `eae24ee`): equipa vermelha vs. azul
+
+Âmbito: todo o repositório, incluindo a validação de ordens do `execution-gateway`.
+A equipa vermelha atacou em várias camadas:
+- Fuzzing da lógica de risco e execução: 200 mil entradas aleatórias e 500 mil casos
+  de precisão.
+- Isolamento entre tenants numa base de dados real, como `atlas_app`.
+- Cadeia de fornecimento e CI.
+A equipa azul corrigiu cada achado confirmado. Cada correção tem um teste que reproduz
+o ataque (`adversarial-*.test.ts`). Desses 89 testes, 80 falham contra o código antigo
+e todos passam contra o corrigido.
+
+### Camadas sem achados
+
+- **Isolamento entre tenants (RLS).** Leitura, escrita, inserção e apagamento entre
+  tenants foram todos bloqueados. Contexto vazio, ausente ou malformado falha fechado.
+  Não há fuga de contexto entre transações na mesma ligação. O `atlas_app` não consegue
+  desativar o RLS nem mudar de papel. Até usar o `prisma` global dentro de uma transação
+  de tenant falha fechado nas tabelas com RLS.
+- **Cadeia de fornecimento.** Os pacotes vêm só do `registry.npmjs.org`, com hash de
+  integridade. O CI não usa triggers nem expressões perigosas. O histórico git não tem
+  segredos. O PR do Dependabot (vitest 5.0.5) é legítimo.
+
+### Achados
+
+| ID | Severidade | Estado | Resumo |
+|----|-----------|--------|--------|
+| X-01 | Crítica | Resolvido | Gateway aceitava ordem com direção, instrumento, preço ou tipo diferentes do aprovado |
+| X-02 | Crítica | Resolvido | `approvedQuantity` `NaN`/`Infinity`/string anulava o limite de quantidade |
+| X-03 | Crítica | Parcial | Decisões forjadas pelo chamador, reutilizadas ou divididas em várias ordens |
+| X-04 | Alta | Resolvido | Ordem invertida após aprovação: exposição líquida 80 000 com limite 30 000 e sem stop |
+| X-05 | Alta | Resolvido | O agente escolhia o modo de trading, incluindo LIVE |
+| X-06 | Alta | Resolvido | Direção não validada (`"BUY"`, `"long"`), headroom líquido inflacionado 6× |
+| X-07 | Alta | Resolvido | Mercado não validado (`"crypto"`, `"CRYPTO "`) contornava limites por mercado |
+| X-08 | Média | Resolvido | Snapshot de concentração com mercados duplicados, total inconsistente ou desatualizado |
+| X-09 | Média | Resolvido | Preço 0 escondia a exposição: exposição bruta real 59 000 com limite 50 000 |
+| X-10 | Média | Aberto | Sem moeda nas posições: valores em USD e JPY somados sem conversão |
+| X-11 | Média | Resolvido | Getters ou Proxies mudavam valores entre validação e uso |
+| X-12 | Baixa | Resolvido | Arredondamento: `maxLoss` excedia o orçamento por ~1 ULP |
+| X-13 | Baixa | Resolvido | Aprovação com quantidade 0 |
+| X-14 | Baixa | Resolvido | Propostas válidas por séculos (`+275760-09-13`) |
+| X-15 | Baixa | Resolvido | Portefólio vazio rejeitava sempre o primeiro trade |
+| X-16 | Baixa | Resolvido | Gateway rebentava com `idempotencyKey` não string |
+| X-17 | Baixa | Resolvido | Testes do gateway compilados para `dist/` e corridos duas vezes |
+| X-18 | Baixa | Resolvido | Build limpa falhava porque o gateway compilava antes do `contracts` |
+
+### Notas
+
+- **X-03.** O validador passa a exigir `reservedQuantity`, e a soma das ordens não pode
+  exceder a quantidade aprovada. Isto fecha a reutilização e a divisão, desde que o
+  chamador forneça o valor real. Falta:
+  - Carregar a decisão pelo `riskDecisionId` a partir de um armazenamento de confiança,
+    não aceitá-la do chamador.
+  - Reservar a quantidade de forma atómica na BD (por exemplo, `UNIQUE` na idempotência
+    e uma reserva por decisão).
+  Ambos dependem da camada de persistência do gateway, que ainda não existe.
+- **Ordens MARKET.** Passam a exigir `limitPrice` como pior preço aceitável. A banda por
+  omissão é de 50 bps à volta da entrada aprovada (`DEFAULT_MAX_SLIPPAGE_BPS`).
+- **Mudanças de API.**
+  - `evaluateRisk` e `evaluateHardRisk` exigem `portfolio`.
+  - `TradeProposal` exige `portfolioId`.
+  - `RiskDecision` passa a incluir `portfolioId`, `instrument`, `direction`, `entryPrice`
+    e `expiresAt`.
+  - O snapshot de concentração não pode ter mais de 60 s
+    (`MAX_SNAPSHOT_AGE_MS`).
+  - Uma proposta não pode ser válida durante mais de 15 min (`MAX_PROPOSAL_TTL_MS`).
+- **RLS com papel partilhado.** Um único papel `atlas_app` pode definir o contexto de
+  qualquer tenant. O RLS protege contra erros da aplicação, mas não contra um processo
+  comprometido. É uma limitação conhecida do modelo, registada em A-05.
+- **Infraestrutura.**
+  - O Postgres só escuta em `127.0.0.1` e o compose exige `POSTGRES_PASSWORD`.
+  - O `.env.example` já não tem palavras-passe por omissão nem `DATABASE_URL` duplicado.
+  - O `sql/rls.sql` partido foi removido; as migrações são a única fonte de RLS.

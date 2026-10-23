@@ -91,6 +91,7 @@ describe("evaluateHardRisk", () => {
             proposal,
             limits,
             concentration,
+            portfolioCapital: 2_500,
             currentGrossExposure: 2_000,
             currentNetExposure: 500,
             currentDailyPnl: 0,
@@ -113,6 +114,7 @@ describe("evaluateHardRisk", () => {
             proposal,
             limits,
             concentration,
+            portfolioCapital: 2_500,
             currentGrossExposure: 2_000,
             currentNetExposure: 500,
             currentDailyPnl: -500,
@@ -136,6 +138,7 @@ describe("evaluateHardRisk", () => {
                 maxMarketConcentrationPercentage: 40,
             },
             concentration,
+            portfolioCapital: 2_500,
             currentGrossExposure: 2_000,
             currentNetExposure: 500,
             currentDailyPnl: 0,
@@ -143,7 +146,7 @@ describe("evaluateHardRisk", () => {
             currentOpenPositions: 2,
         });
 
-        // (500 + x) / (2000 + x) <= 40% allows at most 500 more in CRYPTO.
+        // (500 + x) / 2,500 <= 40% allows at most 500 more in CRYPTO.
         expect(result.status).toBe("APPROVED");
         expect(result.approvedCapital).toBeLessThanOrEqual(500);
         expect(result.approvedCapital).toBeGreaterThan(499.99);
@@ -159,9 +162,10 @@ describe("evaluateHardRisk", () => {
             proposal,
             limits: {
                 ...limits,
-                maxMarketConcentrationPercentage: 25,
+                maxMarketConcentrationPercentage: 20,
             },
             concentration,
+            portfolioCapital: 2_500,
             currentGrossExposure: 2_000,
             currentNetExposure: 500,
             currentDailyPnl: 0,
@@ -192,6 +196,7 @@ describe("evaluateHardRisk", () => {
                 },
             },
             concentration,
+            portfolioCapital: 2_500,
             currentGrossExposure: 2_000,
             currentNetExposure: 500,
             currentDailyPnl: 0,
@@ -219,6 +224,7 @@ describe("evaluateHardRisk", () => {
                 },
             },
             concentration,
+            portfolioCapital: 2_500,
             currentGrossExposure: 2_000,
             currentNetExposure: 500,
             currentDailyPnl: 0,

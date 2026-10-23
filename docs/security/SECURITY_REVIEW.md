@@ -260,9 +260,9 @@ Mudanças de comportamento da ronda 2:
   A slippage configurável tem um teto de 500 bps (`MAX_SLIPPAGE_BPS`).
 - Um trade acima do limite de concentração é reduzido até caber e fica com o motivo
   "Position size was reduced to fit market concentration limits."
-- Nota: num portefólio muito pequeno, um limite percentual de concentração continua
-  a permitir trades muito pequenos, porque é relativo à exposição atual. Para mudar
-  isto, o limite teria de ser relativo ao capital do portefólio.
+- Nota: num portefólio muito pequeno, um limite percentual medido sobre a exposição
+  atual só permitia trades minúsculos. Resolvido com a decisão abaixo: os limites
+  passam a ser medidos sobre o capital do portefólio.
 
 ### Ronda 3
 
@@ -273,8 +273,8 @@ de arredondamento. Encontrou 4 problemas de severidade baixa ou informativa
 (X-27 a X-30), todos rejeições indevidas ou aprovações de trades sem significado.
 Foram corrigidos:
 - Capacidade de concentração abaixo de 1e-9 da exposição bruta conta como zero.
-- Exposição bruta até 1e-6 (`DUST_EXPOSURE`) conta como portefólio vazio para os
-  limites percentuais.
+- O resíduo de float num portefólio vazio deixou de importar, porque os limites
+  passaram a ser medidos sobre o capital (ver a decisão abaixo).
 - Quando a verificação final de concentração falha por erro de float, o tamanho é
   recalculado com margens maiores (1e-6 e depois 1e-3) antes de rejeitar.
 - `parseTimestamp` rejeita datas que não existem no calendário.
@@ -282,6 +282,25 @@ Foram corrigidos:
 Os testes da ronda 3 falham contra o código da ronda 2 (7 de 14; os outros 7 são
 casos de controlo ou casos que esse código já tratava bem) e passam contra o
 código atual.
+
+### Decisão: limites de concentração sobre o capital do portefólio
+
+Decidido pelo dono do projeto. Os limites percentuais de concentração (global e por
+mercado) passam a ser medidos sobre o capital total do portefólio, e não sobre a
+exposição atual:
+
+`(exposição do mercado + trade) / capital do portefólio ≤ limite`
+
+- `evaluateHardRisk` e `evaluateConcentration` exigem `portfolioCapital` (capital total
+  na moeda base, positivo e finito). Um valor inválido é rejeitado.
+- O limite aplica-se a todos os trades, incluindo o primeiro de um portefólio vazio.
+  Desaparece o caso especial de portefólio vazio.
+- Um portefólio pequeno já não fica bloqueado. Por exemplo, uma posição de 0,01 com
+  um limite de 60% e capital 10 000 permite um trade de até 6 000.
+- A fórmula passou a ser linear, por isso os casos de float perto de 100% (X-29) e
+  de resíduo de exposição (X-28) já não dependem de exposição pequena.
+- Há um teste de propriedade com 20 mil casos aleatórios: nenhuma aprovação passa os
+  limites global e por mercado (percentagem e exposição absoluta).
 
 ### Notas
 

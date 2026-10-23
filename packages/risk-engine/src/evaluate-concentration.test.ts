@@ -76,6 +76,7 @@ describe("evaluateConcentration", () => {
             proposal,
             limits,
             concentration,
+            portfolioCapital: 1_500,
             proposedCapital: 200,
         });
 
@@ -90,6 +91,7 @@ describe("evaluateConcentration", () => {
                 maxMarketConcentrationPercentage: 45,
             },
             concentration,
+            portfolioCapital: 1_500,
             proposedCapital: 300,
         });
 
@@ -112,6 +114,7 @@ describe("evaluateConcentration", () => {
                 },
             },
             concentration,
+            portfolioCapital: 1_500,
             proposedCapital: 200,
         });
 
@@ -130,6 +133,7 @@ describe("evaluateConcentration", () => {
                     ...concentration,
                     tenantId: "tenant-2",
                 },
+                portfolioCapital: 1_500,
                 proposedCapital: 200,
             }),
         ).toThrow(
@@ -146,6 +150,7 @@ describe("evaluateConcentration", () => {
                     ...concentration,
                     portfolioId: "portfolio-2",
                 },
+                portfolioCapital: 1_500,
                 proposedCapital: 200,
             }),
         ).toThrow(
@@ -161,6 +166,7 @@ describe("evaluateConcentration", () => {
                 maxMarketConcentrationPercentage: NaN,
             },
             concentration,
+            portfolioCapital: 1_500,
             proposedCapital: 200,
         });
 
@@ -178,6 +184,7 @@ describe("evaluateConcentration", () => {
                 ...concentration,
                 grossExposure: NaN,
             },
+            portfolioCapital: 1_500,
             proposedCapital: 200,
         });
 
@@ -201,6 +208,7 @@ describe("evaluateConcentration", () => {
                     },
                 ],
             },
+            portfolioCapital: 1_500,
             proposedCapital: 200,
         });
 
@@ -223,6 +231,7 @@ describe("evaluateConcentration", () => {
                 },
             },
             concentration,
+            portfolioCapital: 1_500,
             proposedCapital: 200,
         });
 
@@ -230,5 +239,39 @@ describe("evaluateConcentration", () => {
         expect(result.reason).toBe(
             "Market-specific limits must be valid non-negative numbers.",
         );
+    });
+
+    it.each([0, -1, NaN, Infinity])(
+        "rejects portfolio capital %d",
+        (portfolioCapital) => {
+            const result = evaluateConcentration({
+                proposal,
+                limits,
+                concentration,
+                portfolioCapital,
+                proposedCapital: 200,
+            });
+
+            expect(result.approved).toBe(false);
+            expect(result.reason).toBe(
+                "Portfolio capital must be a positive finite number.",
+            );
+        },
+    );
+
+    it("measures concentration against portfolio capital, not exposure", () => {
+        // 600 / 1,000 of exposure is 60%, but only 6% of 10,000 capital.
+        const result = evaluateConcentration({
+            proposal,
+            limits: {
+                ...limits,
+                maxMarketConcentrationPercentage: 10,
+            },
+            concentration,
+            portfolioCapital: 10_000,
+            proposedCapital: 200,
+        });
+
+        expect(result.approved).toBe(true);
     });
 });

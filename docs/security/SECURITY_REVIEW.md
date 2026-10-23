@@ -235,6 +235,10 @@ e todos passam contra o corrigido.
 | X-24 | Baixa | Resolvido | Ordens de pó passavam sem fim depois de a decisão estar totalmente reservada |
 | X-25 | Baixa | Resolvido | Entradas malformadas (`null`, BigInt, `Date`) rebentavam com TypeError |
 | X-26 | Baixa | Resolvido | `baseAsset`/`quoteAsset` da ordem não eram comparados com os da decisão |
+| X-27 | Baixa | Resolvido | Mercado exatamente no limite aprovava um trade de pó (resíduo de arredondamento) |
+| X-28 | Baixa | Resolvido | Resíduo de float na exposição de um portefólio vazio bloqueava o primeiro trade |
+| X-29 | Baixa | Resolvido | Rejeição indevida com limites de concentração ≥ 99,99999% |
+| X-30 | Info | Resolvido | `parseTimestamp` aceitava datas impossíveis (30 de fevereiro, 24:00) |
 
 ### Ronda 2
 
@@ -259,6 +263,25 @@ Mudanças de comportamento da ronda 2:
 - Nota: num portefólio muito pequeno, um limite percentual de concentração continua
   a permitir trades muito pequenos, porque é relativo à exposição atual. Para mudar
   isto, o limite teria de ser relativo ao capital do portefólio.
+
+### Ronda 3
+
+Uma terceira equipa vermelha atacou as correções da ronda 2 com cerca de 2,9
+milhões de casos aleatórios, verificados com aritmética racional exata, em 5 fusos
+horários. **Nenhum ataque ultrapassou um limite**, para lá de diferenças de ~1 ULP
+de arredondamento. Encontrou 4 problemas de severidade baixa ou informativa
+(X-27 a X-30), todos rejeições indevidas ou aprovações de trades sem significado.
+Foram corrigidos:
+- Capacidade de concentração abaixo de 1e-9 da exposição bruta conta como zero.
+- Exposição bruta até 1e-6 (`DUST_EXPOSURE`) conta como portefólio vazio para os
+  limites percentuais.
+- Quando a verificação final de concentração falha por erro de float, o tamanho é
+  recalculado com margens maiores (1e-6 e depois 1e-3) antes de rejeitar.
+- `parseTimestamp` rejeita datas que não existem no calendário.
+
+Os testes da ronda 3 falham contra o código da ronda 2 (7 de 14; os outros 7 são
+casos de controlo ou casos que esse código já tratava bem) e passam contra o
+código atual.
 
 ### Notas
 

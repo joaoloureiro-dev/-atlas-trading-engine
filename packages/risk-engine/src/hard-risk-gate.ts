@@ -10,6 +10,7 @@ import {
     approximatelyEqual,
     calculateConcentrationCapacity,
     evaluateConcentration,
+    type ConcentrationDecision,
 } from "./evaluate-concentration.js";
 import {
     evaluateRisk,
@@ -104,28 +105,43 @@ export function evaluateHardRisk(
     }
 
     // Size the trade down to what the concentration limits allow instead of
-    // rejecting it outright.
-    const decision =
-        capacity.maxCapital < baseDecision.approvedCapital
+    // rejecting it outright. Near 100% limits float error can exceed the
+    // sizing margin, so retry with wider margins before giving up.
+    const sizedByConcentration =
+        capacity.maxCapital < baseDecision.approvedCapital;
+
+    const margins = sizedByConcentration ? [1, 1 - 1e-6, 1 - 1e-3] : [1];
+
+    let decision = baseDecision;
+    let concentrationDecision: ConcentrationDecision = {
+        approved: false,
+    };
+
+    for (const margin of margins) {
+        decision = sizedByConcentration
             ? evaluateRisk({
                 ...riskInput,
-                maxCapitalByConcentration: capacity.maxCapital,
+                maxCapitalByConcentration: capacity.maxCapital * margin,
             })
             : baseDecision;
 
-    if (decision.status !== "APPROVED") {
-        return decision;
-    }
+        if (decision.status !== "APPROVED") {
+            return decision;
+        }
 
-    // Defence in depth: the sized trade must pass the concentration checks.
-    const concentrationDecision =
-        evaluateConcentration({
+        // Defence in depth: the sized trade must pass the concentration
+        // checks.
+        concentrationDecision = evaluateConcentration({
             proposal: riskInput.proposal,
             limits: riskInput.limits,
             concentration,
-            proposedCapital:
-                decision.approvedCapital,
+            proposedCapital: decision.approvedCapital,
         });
+
+        if (concentrationDecision.approved) {
+            break;
+        }
+    }
 
     if (!concentrationDecision.approved) {
         return reject(
@@ -139,7 +155,7 @@ export function evaluateHardRisk(
 
         reasons: [
             ...decision.reasons,
-            ...(decision === baseDecision
+            ...(!sizedByConcentration
                 ? []
                 : [
                     "Position size was reduced to fit market concentration limits.",

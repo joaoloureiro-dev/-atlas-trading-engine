@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-    Portfolio,
-    PortfolioConcentration,
-    RiskLimits,
-    TradeProposal,
+import {
+    parseTimestamp,
+    type Portfolio,
+    type PortfolioConcentration,
+    type RiskLimits,
+    type TradeProposal,
 } from "@atlas/contracts";
 
 import { evaluateHardRisk } from "./hard-risk-gate.js";
@@ -637,5 +638,129 @@ describe("round 2", () => {
         const result = hardRisk(overrides);
 
         expect(result.status).toBe("REJECTED");
+    });
+});
+
+describe("round 3", () => {
+    const huge = {
+        maxPositionNotional: 1e15,
+        maxRiskPerTrade: 1e15,
+        maxDailyLoss: 1e15,
+        maxGrossExposure: 1e16,
+        maxNetExposure: 1e16,
+    };
+
+    it("rejects instead of approving dust when a market sits at its limit", () => {
+        const result = hardRisk({
+            limits: {
+                ...limits,
+                ...huge,
+                maxMarketConcentrationPercentage: 100 / 3,
+            },
+            concentration: {
+                ...concentration,
+                grossExposure: 3_000,
+                markets: [
+                    {
+                        market: "CRYPTO",
+                        exposure: 1_000,
+                        percentageOfGrossExposure: 100 / 3,
+                    },
+                    {
+                        market: "STOCKS",
+                        exposure: 2_000,
+                        percentageOfGrossExposure: 200 / 3,
+                    },
+                ],
+            },
+            ...state,
+            currentGrossExposure: 3_000,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Maximum market concentration would be exceeded.",
+        );
+    });
+
+    it.each([0.1 + 0.2 - 0.3, 1e-9])(
+        "treats float residue %d as an empty portfolio",
+        (residue) => {
+            const result = hardRisk({
+                limits: {
+                    ...limits,
+                    maxPositionNotional: 10_000,
+                    maxMarketConcentrationPercentage: 50,
+                },
+                concentration: {
+                    ...concentration,
+                    grossExposure: residue,
+                    markets: [
+                        {
+                            market: "STOCKS",
+                            exposure: residue,
+                            percentageOfGrossExposure: 100,
+                        },
+                    ],
+                },
+                ...state,
+                currentGrossExposure: residue,
+            });
+
+            expect(result.status).toBe("APPROVED");
+            expect(result.approvedCapital).toBeGreaterThan(1);
+        },
+    );
+
+    it.each([99.99999, 99.999999, 99.9999999])(
+        "sizes instead of rejecting at a %d%% concentration limit",
+        (maxMarketConcentrationPercentage) => {
+            const result = hardRisk({
+                limits: {
+                    ...limits,
+                    ...huge,
+                    maxMarketConcentrationPercentage,
+                },
+                concentration: {
+                    ...concentration,
+                    grossExposure: 10367.4 + 1978.27,
+                    markets: [
+                        {
+                            market: "CRYPTO",
+                            exposure: 10367.4,
+                            percentageOfGrossExposure: 84,
+                        },
+                        {
+                            market: "STOCKS",
+                            exposure: 1978.27,
+                            percentageOfGrossExposure: 16,
+                        },
+                    ],
+                },
+                ...state,
+                currentGrossExposure: 10367.4 + 1978.27,
+            });
+
+            expect(result.status).toBe("APPROVED");
+            expect(result.approvedCapital).toBeGreaterThan(1e9);
+        },
+    );
+
+    it.each([
+        "2026-02-30T00:00:00Z",
+        "2026-04-31T10:00:00Z",
+        "2026-01-01T24:00:00Z",
+        "2026-01-01T12:60:00Z",
+        "2026-13-01T00:00:00Z",
+    ])("rejects calendar-invalid timestamp %s", (value) => {
+        expect(parseTimestamp(value)).toBeNaN();
+    });
+
+    it.each([
+        ["2024-02-29T00:00:00Z", Date.UTC(2024, 1, 29)],
+        ["2026-01-01T02:00:00+02:00", Date.UTC(2026, 0, 1)],
+        ["2026-01-01T00:00:00.123Z", Date.UTC(2026, 0, 1) + 123],
+    ])("parses valid timestamp %s", (value, expected) => {
+        expect(parseTimestamp(value)).toBe(expected);
     });
 });

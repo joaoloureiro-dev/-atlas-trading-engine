@@ -2,6 +2,8 @@ import {
     ORDER_TYPES,
     TRADE_DIRECTIONS,
     TRADING_MODES,
+    parseTimestamp,
+    type Instrument,
     type OrderIntent,
     type RiskDecision,
 } from "@atlas/contracts";
@@ -11,6 +13,11 @@ import {
  * order may fill at, in basis points.
  */
 export const DEFAULT_MAX_SLIPPAGE_BPS = 50;
+
+/**
+ * Largest slippage tolerance a caller may configure.
+ */
+export const MAX_SLIPPAGE_BPS = 500;
 
 export interface ValidateOrderIntentInput {
     orderIntent: OrderIntent;
@@ -51,6 +58,16 @@ export function validateOrderIntent(
     const reasons: string[] = [];
 
     if (
+        !isInstrument(orderIntent.instrument) ||
+        !isInstrument(riskDecision.instrument)
+    ) {
+        return {
+            valid: false,
+            reasons: ["Order intent or risk decision is malformed."],
+        };
+    }
+
+    if (
         orderIntent.tenantId !==
         riskDecision.tenantId
     ) {
@@ -85,7 +102,7 @@ export function validateOrderIntent(
         );
     }
 
-    const expiresAt = Date.parse(riskDecision.expiresAt);
+    const expiresAt = parseTimestamp(riskDecision.expiresAt);
 
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
         reasons.push(
@@ -119,7 +136,11 @@ export function validateOrderIntent(
         orderIntent.instrument.market !==
         riskDecision.instrument.market ||
         orderIntent.instrument.externalId !==
-        riskDecision.instrument.externalId
+        riskDecision.instrument.externalId ||
+        orderIntent.instrument.baseAsset !==
+        riskDecision.instrument.baseAsset ||
+        orderIntent.instrument.quoteAsset !==
+        riskDecision.instrument.quoteAsset
     ) {
         reasons.push(
             "Order instrument does not match the risk decision.",
@@ -132,10 +153,9 @@ export function validateOrderIntent(
         );
     }
 
-    if (
-        !Number.isFinite(orderIntent.quantity) ||
-        orderIntent.quantity <= 0
-    ) {
+    const quantityValid = isPositiveFinite(orderIntent.quantity);
+
+    if (!quantityValid) {
         reasons.push(
             "Order quantity must be a positive finite number.",
         );
@@ -143,15 +163,12 @@ export function validateOrderIntent(
 
     // Comparisons against NaN are always false, so the approved quantity and
     // the reserved quantity must be validated before the cap below.
-    if (
-        riskDecision.approvedQuantity === undefined ||
-        !Number.isFinite(riskDecision.approvedQuantity) ||
-        riskDecision.approvedQuantity <= 0
-    ) {
+    if (!isPositiveFinite(riskDecision.approvedQuantity)) {
         reasons.push(
             "Risk decision does not contain a valid approved quantity.",
         );
     } else if (
+        typeof reservedQuantity !== "number" ||
         !Number.isFinite(reservedQuantity) ||
         reservedQuantity < 0
     ) {
@@ -159,8 +176,12 @@ export function validateOrderIntent(
             "Reserved quantity must be a non-negative finite number.",
         );
     } else if (
-        orderIntent.quantity + reservedQuantity >
-        riskDecision.approvedQuantity
+        quantityValid &&
+        // Compare against what is left rather than adding to the reserved
+        // quantity: a tiny order added to a large total can round away and
+        // pass again and again.
+        orderIntent.quantity >
+        riskDecision.approvedQuantity - reservedQuantity
     ) {
         reasons.push(
             "Order quantity exceeds the quantity approved by risk.",
@@ -176,11 +197,18 @@ export function validateOrderIntent(
         );
     }
 
-    const { entryPrice, stopLossPrice } = riskDecision;
+    const {
+        entryPrice,
+        stopLossPrice,
+        maxLoss,
+        approvedCapital,
+    } = riskDecision;
 
     const decisionPricesValid =
         isPositiveFinite(entryPrice) &&
         isPositiveFinite(stopLossPrice) &&
+        isPositiveFinite(maxLoss) &&
+        isPositiveFinite(approvedCapital) &&
         (
             riskDecision.direction === "LONG"
                 ? stopLossPrice < entryPrice
@@ -189,16 +217,19 @@ export function validateOrderIntent(
 
     if (!decisionPricesValid) {
         reasons.push(
-            "Risk decision entry and stop loss prices are invalid.",
+            "Risk decision prices, loss or capital are invalid.",
         );
     }
 
-    if (
-        !Number.isFinite(maxSlippageBps) ||
-        maxSlippageBps < 0
-    ) {
+    const slippageValid =
+        typeof maxSlippageBps === "number" &&
+        Number.isFinite(maxSlippageBps) &&
+        maxSlippageBps >= 0 &&
+        maxSlippageBps <= MAX_SLIPPAGE_BPS;
+
+    if (!slippageValid) {
         reasons.push(
-            "Maximum slippage must be a non-negative finite number.",
+            `Maximum slippage must be between 0 and ${MAX_SLIPPAGE_BPS} basis points.`,
         );
     }
 
@@ -233,6 +264,16 @@ export function validateOrderIntent(
     }
 
     if (
+        orderType === "STOP" &&
+        !isPositiveFinite(limitPrice)
+    ) {
+        // A triggered stop fills at market, so it needs a worst price too.
+        reasons.push(
+            "Stop orders require a worst acceptable price.",
+        );
+    }
+
+    if (
         orderType === "STOP_LIMIT" &&
         (
             !isPositiveFinite(stopPrice) ||
@@ -244,19 +285,30 @@ export function validateOrderIntent(
         );
     }
 
-    if (decisionPricesValid) {
+    if (decisionPricesValid && slippageValid && quantityValid) {
         const slippage = maxSlippageBps / 10_000;
 
         // Prices must stay on the profitable side of the stop loss and within
         // the slippage band around the approved entry.
         const tolerance = entryPrice * slippage;
 
+        const { quantity } = orderIntent;
+
+        // Filling at this price must not lose more than risk approved at the
+        // stop, nor use more capital than approved.
+        const withinRisk = (price: number): boolean =>
+            quantity * Math.abs(price - stopLossPrice) <= maxLoss &&
+            quantity * price <= approvedCapital;
+
         const withinBand = (price: number): boolean =>
-            riskDecision.direction === "LONG"
-                ? price > stopLossPrice &&
-                price <= entryPrice + tolerance
-                : price < stopLossPrice &&
-                price >= entryPrice - tolerance;
+            withinRisk(price) &&
+            (
+                riskDecision.direction === "LONG"
+                    ? price > stopLossPrice &&
+                    price <= entryPrice + tolerance
+                    : price < stopLossPrice &&
+                    price >= entryPrice - tolerance
+            );
 
         const prices = [
             limitPrice,
@@ -273,7 +325,7 @@ export function validateOrderIntent(
             )
         ) {
             reasons.push(
-                "Order prices must be within the approved entry band and on the correct side of the stop loss.",
+                "Order prices must be within the approved entry band, the approved risk and on the correct side of the stop loss.",
             );
         }
     }
@@ -289,5 +341,14 @@ function isPositiveFinite(value: number | undefined): value is number {
         typeof value === "number" &&
         Number.isFinite(value) &&
         value > 0
+    );
+}
+
+function isInstrument(value: unknown): value is Instrument {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        typeof (value as Instrument).symbol === "string" &&
+        typeof (value as Instrument).market === "string"
     );
 }

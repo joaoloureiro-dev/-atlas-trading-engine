@@ -126,7 +126,7 @@ describe("evaluateHardRisk", () => {
         );
     });
 
-    it("rejects when projected concentration exceeds the limit", () => {
+    it("reduces the position to fit the concentration limit", () => {
         const result = evaluateHardRisk({
             decisionId: "decision-3",
             portfolio,
@@ -134,6 +134,32 @@ describe("evaluateHardRisk", () => {
             limits: {
                 ...limits,
                 maxMarketConcentrationPercentage: 40,
+            },
+            concentration,
+            currentGrossExposure: 2_000,
+            currentNetExposure: 500,
+            currentDailyPnl: 0,
+            currentDrawdownPercentage: 0,
+            currentOpenPositions: 2,
+        });
+
+        // (500 + x) / (2000 + x) <= 40% allows at most 500 more in CRYPTO.
+        expect(result.status).toBe("APPROVED");
+        expect(result.approvedCapital).toBeLessThanOrEqual(500);
+        expect(result.approvedCapital).toBeGreaterThan(499.99);
+        expect(result.reasons).toContain(
+            "Position size was reduced to fit market concentration limits.",
+        );
+    });
+
+    it("rejects when the market is already at its concentration limit", () => {
+        const result = evaluateHardRisk({
+            decisionId: "decision-4",
+            portfolio,
+            proposal,
+            limits: {
+                ...limits,
+                maxMarketConcentrationPercentage: 25,
             },
             concentration,
             currentGrossExposure: 2_000,
@@ -151,9 +177,9 @@ describe("evaluateHardRisk", () => {
         );
     });
 
-    it("rejects when market-specific exposure would be exceeded", () => {
+    it("reduces the position to fit market-specific exposure", () => {
         const result = evaluateHardRisk({
-            decisionId: "decision-4",
+            decisionId: "decision-5",
             portfolio,
             proposal,
             limits: {
@@ -173,9 +199,34 @@ describe("evaluateHardRisk", () => {
             currentOpenPositions: 2,
         });
 
+        expect(result.status).toBe("APPROVED");
+        expect(result.approvedCapital).toBeLessThanOrEqual(500);
+        expect(result.approvedCapital).toBeGreaterThan(499.99);
+    });
+
+    it("rejects when market-specific exposure is already used up", () => {
+        const result = evaluateHardRisk({
+            decisionId: "decision-6",
+            portfolio,
+            proposal,
+            limits: {
+                ...limits,
+                marketLimits: {
+                    CRYPTO: {
+                        maxExposure: 500,
+                        maxConcentrationPercentage: 80,
+                    },
+                },
+            },
+            concentration,
+            currentGrossExposure: 2_000,
+            currentNetExposure: 500,
+            currentDailyPnl: 0,
+            currentDrawdownPercentage: 0,
+            currentOpenPositions: 2,
+        });
+
         expect(result.status).toBe("REJECTED");
-        expect(result.reasons).toContain(
-            "Maximum market-specific exposure would be exceeded.",
-        );
+        expect(result.approvedCapital).toBe(0);
     });
 });

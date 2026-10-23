@@ -123,7 +123,9 @@ describe("order prices", () => {
     );
 
     it("accepts a long limit price at the edge of the band", () => {
-        expect(validate({ limitPrice: 100.5 }).valid).toBe(true);
+        expect(
+            validate({ limitPrice: 100.5, quantity: 10 }).valid,
+        ).toBe(true);
     });
 
     it("rejects a stop order on the wrong side", () => {
@@ -155,7 +157,10 @@ describe("order prices", () => {
         };
 
         expect(
-            validate({ direction: "SHORT", limitPrice: 99.5 }, short).valid,
+            validate(
+                { direction: "SHORT", limitPrice: 99.5, quantity: 10 },
+                short,
+            ).valid,
         ).toBe(true);
         expect(
             validate({ direction: "SHORT", limitPrice: 99 }, short).valid,
@@ -170,7 +175,7 @@ describe("order prices", () => {
 
         expect(result.valid).toBe(false);
         expect(result.reasons).toContain(
-            "Risk decision entry and stop loss prices are invalid.",
+            "Risk decision prices, loss or capital are invalid.",
         );
     });
 
@@ -255,5 +260,131 @@ describe("malformed intents", () => {
                 reservedQuantity: 0,
             }),
         ).toThrow();
+    });
+});
+
+describe("round 2", () => {
+    it("rejects a decision expiry without an explicit UTC offset", () => {
+        const local = new Date(Date.now() + 6 * 3_600_000)
+            .toISOString()
+            .replace("Z", "");
+
+        const result = validate({}, { expiresAt: local });
+
+        expect(result.valid).toBe(false);
+        expect(result.reasons).toContain("Risk decision has expired.");
+    });
+
+    it("rejects a stop order without a worst acceptable price", () => {
+        const result = validate({
+            orderType: "STOP",
+            limitPrice: undefined,
+            stopPrice: 100.1,
+            quantity: 10,
+        });
+
+        expect(result.valid).toBe(false);
+        expect(result.reasons).toContain(
+            "Stop orders require a worst acceptable price.",
+        );
+    });
+
+    it("accepts a stop order with a worst acceptable price", () => {
+        const result = validate({
+            orderType: "STOP",
+            stopPrice: 100.1,
+            limitPrice: 100.2,
+            quantity: 10,
+        });
+
+        expect(result).toEqual({ valid: true, reasons: [] });
+    });
+
+    it.each([
+        [20, 20, 1.7e-15],
+        [1e6, 1e6, 5e-11],
+        [1e17, 1e17, 8],
+    ])(
+        "rejects dust once %d of %d is reserved (quantity %d)",
+        (approvedQuantity, reservedQuantity, quantity) => {
+            const result = validate(
+                { quantity, limitPrice: 100 },
+                {
+                    approvedQuantity,
+                    approvedCapital: approvedQuantity * 100,
+                    maxLoss: approvedQuantity * 5,
+                },
+                reservedQuantity,
+            );
+
+            expect(result.valid).toBe(false);
+            expect(result.reasons).toContain(
+                "Order quantity exceeds the quantity approved by risk.",
+            );
+        },
+    );
+
+    it("rejects slippage that would lose more than the approved max loss", () => {
+        const result = validate(
+            { quantity: 10, limitPrice: 100.5 },
+            {
+                stopLossPrice: 99.9,
+                approvedQuantity: 10,
+                approvedCapital: 1_005,
+                maxLoss: 1,
+            },
+        );
+
+        expect(result.valid).toBe(false);
+    });
+
+    it("rejects a slippage tolerance above the ceiling", () => {
+        const result = validateOrderIntent({
+            orderIntent: { ...orderIntent, limitPrice: 1e6 },
+            riskDecision,
+            reservedQuantity: 0,
+            maxSlippageBps: 1e9,
+        });
+
+        expect(result.valid).toBe(false);
+    });
+
+    it.each([
+        ["base asset", { baseAsset: "ETH" }],
+        ["quote asset", { quoteAsset: "EUR" }],
+    ])("rejects a different %s", (_name, assets) => {
+        const result = validate({
+            instrument: {
+                symbol: "BTC-USD",
+                market: "CRYPTO",
+                ...assets,
+            },
+        });
+
+        expect(result.valid).toBe(false);
+        expect(result.reasons).toContain(
+            "Order instrument does not match the risk decision.",
+        );
+    });
+
+    it.each([
+        ["order instrument null", { instrument: null }, {}],
+        ["decision instrument missing", {}, { instrument: undefined }],
+    ])("rejects malformed input: %s", (_name, intent, decision) => {
+        const result = validate(intent, decision);
+
+        expect(result.valid).toBe(false);
+        expect(result.reasons).toContain(
+            "Order intent or risk decision is malformed.",
+        );
+    });
+
+    it("rejects a BigInt quantity without throwing", () => {
+        const result = validate({ quantity: 10n as never });
+
+        expect(result.valid).toBe(false);
+        expect(result.reasons).toContain(
+            "Order quantity must be a positive finite number.",
+        );
     });
 });

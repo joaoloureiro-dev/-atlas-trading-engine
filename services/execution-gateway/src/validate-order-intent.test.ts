@@ -61,7 +61,7 @@ const orderIntent: OrderIntent = {
 
     orderType: "MARKET",
 
-    limitPrice: 100.5,
+    limitPrice: 100,
 
     tradingMode: "PAPER",
 

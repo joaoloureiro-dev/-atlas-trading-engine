@@ -414,7 +414,8 @@ describe("concentration snapshot", () => {
             currentGrossExposure: 0,
         });
 
-        expect(result.status).toBe("REJECTED");
+        expect(result.status).toBe("APPROVED");
+        expect(result.approvedCapital).toBeLessThanOrEqual(1);
     });
 });
 
@@ -525,6 +526,115 @@ describe("sizing", () => {
             portfolio,
             ...state,
         });
+
+        expect(result.status).toBe("REJECTED");
+    });
+});
+
+describe("round 2", () => {
+    it.each([
+        "2099-01-01T00:00:00",
+        "2099-01-01",
+        "Tue Jan 01 2099",
+    ])("rejects expiry %j without an explicit UTC offset", (expiresAt) => {
+        const result = hardRisk({
+            proposal: { ...proposal, expiresAt },
+        });
+
+        expect(result.status).toBe("REJECTED");
+    });
+
+    it("rejects a Date object instead of a timestamp string", () => {
+        const result = hardRisk({
+            proposal: {
+                ...proposal,
+                expiresAt: new Date(Date.now() + 60_000) as never,
+            },
+        });
+
+        expect(result.status).toBe("REJECTED");
+    });
+
+    it("stores the decision expiry normalized to UTC", () => {
+        const expiresAt = new Date(Date.now() + 60_000);
+        const withOffset = new Date(
+            expiresAt.getTime() + 2 * 3_600_000,
+        )
+            .toISOString()
+            .replace("Z", "+02:00");
+
+        const result = hardRisk({
+            proposal: { ...proposal, expiresAt: withOffset },
+        });
+
+        expect(result.status).toBe("APPROVED");
+        expect(result.expiresAt).toBe(expiresAt.toISOString());
+    });
+
+    it("allows a trade that reduces net exposure at its limit", () => {
+        const result = hardRisk({
+            proposal: {
+                ...proposal,
+                direction: "SHORT",
+                invalidationPrice: 105,
+            },
+            ...state,
+            currentNetExposure: limits.maxNetExposure,
+        });
+
+        expect(result.status).toBe("APPROVED");
+    });
+
+    it("still rejects a trade that adds to net exposure at its limit", () => {
+        const result = hardRisk({
+            ...state,
+            currentNetExposure: limits.maxNetExposure,
+        });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain("Maximum net exposure reached.");
+    });
+
+    it("sizes a trade down to the concentration limit", () => {
+        const result = hardRisk({
+            limits: {
+                ...limits,
+                maxPositionNotional: 10_000,
+                maxMarketConcentrationPercentage: 50,
+            },
+            concentration: {
+                ...concentration,
+                grossExposure: 1_000,
+                markets: [
+                    {
+                        market: "STOCKS",
+                        exposure: 1_000,
+                        percentageOfGrossExposure: 100,
+                    },
+                ],
+            },
+            ...state,
+            currentGrossExposure: 1_000,
+        });
+
+        expect(result.status).toBe("APPROVED");
+        expect(result.approvedCapital).toBeLessThanOrEqual(1_000);
+        expect(result.approvedCapital).toBeGreaterThan(999.99);
+    });
+
+    it.each([
+        ["instrument null", { proposal: { ...proposal, instrument: null as never } }],
+        ["concentration missing", { concentration: undefined as never }],
+        [
+            "markets missing",
+            { concentration: { ...concentration, markets: undefined as never } },
+        ],
+        [
+            "market entry null",
+            { concentration: { ...concentration, markets: [null as never] } },
+        ],
+    ])("rejects malformed input: %s", (_name, overrides) => {
+        const result = hardRisk(overrides);
 
         expect(result.status).toBe("REJECTED");
     });

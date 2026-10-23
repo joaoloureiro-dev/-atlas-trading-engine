@@ -227,6 +227,38 @@ e todos passam contra o corrigido.
 | X-16 | Baixa | Resolvido | Gateway rebentava com `idempotencyKey` não string |
 | X-17 | Baixa | Resolvido | Testes do gateway compilados para `dist/` e corridos duas vezes |
 | X-18 | Baixa | Resolvido | Build limpa falhava porque o gateway compilava antes do `contracts` |
+| X-19 | Média | Resolvido | Datas sem fuso eram lidas na hora local de cada serviço: validade dependia do fuso |
+| X-20 | Média | Resolvido | Ordens STOP sem pior preço: slippage ilimitada depois do disparo |
+| X-21 | Média | Resolvido | A slippage permitida podia levar a perda acima do `maxLoss` aprovado; slippage sem teto |
+| X-22 | Média | Resolvido | Com a exposição líquida no limite, trades que a reduziam eram rejeitados |
+| X-23 | Média | Resolvido | Trades acima do limite de concentração eram rejeitados em vez de reduzidos |
+| X-24 | Baixa | Resolvido | Ordens de pó passavam sem fim depois de a decisão estar totalmente reservada |
+| X-25 | Baixa | Resolvido | Entradas malformadas (`null`, BigInt, `Date`) rebentavam com TypeError |
+| X-26 | Baixa | Resolvido | `baseAsset`/`quoteAsset` da ordem não eram comparados com os da decisão |
+
+### Ronda 2
+
+Uma nova equipa vermelha atacou as correções da ronda 1 e confirmou que o
+dimensionamento é sólido: em 200 mil casos aleatórios, nenhuma aprovação excedeu
+os limites, e o ciclo de arredondamento nunca precisou de mais de 2 iterações em
+5 milhões de casos. Encontrou X-19 a X-26. Os testes da ronda 2 falham contra o
+código da ronda 1 (20 de 25; os outros são casos de controlo) e passam contra o
+código atual. As suítes foram corridas nos fusos UTC, America/Adak, Etc/GMT+12 e
+Asia/Kolkata.
+
+Mudanças de comportamento da ronda 2:
+- Datas só em ISO-8601 com `Z` ou offset explícito (`parseTimestamp`). O
+  `expiresAt` da decisão é guardado em UTC.
+- Ordens STOP exigem `limitPrice` como pior preço, tal como as MARKET.
+- Uma ordem não pode perder mais do que o `maxLoss` aprovado, nem usar mais do que
+  o `approvedCapital`, a nenhum dos seus preços. Na quantidade total aprovada, isto
+  significa entrar ao preço aprovado; a slippage só cabe em ordens mais pequenas.
+  A slippage configurável tem um teto de 500 bps (`MAX_SLIPPAGE_BPS`).
+- Um trade acima do limite de concentração é reduzido até caber e fica com o motivo
+  "Position size was reduced to fit market concentration limits."
+- Nota: num portefólio muito pequeno, um limite percentual de concentração continua
+  a permitir trades muito pequenos, porque é relativo à exposição atual. Para mudar
+  isto, o limite teria de ser relativo ao capital do portefólio.
 
 ### Notas
 

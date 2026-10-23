@@ -25,6 +25,12 @@ export interface EvaluateHardRiskInput {
 
     concentration: PortfolioConcentration;
 
+    /**
+     * Total capital of the portfolio in its base currency. Concentration
+     * percentage limits are measured against it.
+     */
+    portfolioCapital: number;
+
     currentGrossExposure: number;
     currentNetExposure: number;
 
@@ -40,6 +46,7 @@ export function evaluateHardRisk(
     // Copy the inputs once so every check below sees the same values.
     const {
         concentration,
+        portfolioCapital,
         ...riskInput
     } = structuredClone(input);
 
@@ -92,6 +99,7 @@ export function evaluateHardRisk(
         proposal: riskInput.proposal,
         limits: riskInput.limits,
         concentration,
+        portfolioCapital,
     });
 
     if (!capacity.approved) {
@@ -105,8 +113,8 @@ export function evaluateHardRisk(
     }
 
     // Size the trade down to what the concentration limits allow instead of
-    // rejecting it outright. Near 100% limits float error can exceed the
-    // sizing margin, so retry with wider margins before giving up.
+    // rejecting it outright. If float error still trips the recheck, retry
+    // with wider margins before giving up.
     const sizedByConcentration =
         capacity.maxCapital < baseDecision.approvedCapital;
 
@@ -135,6 +143,7 @@ export function evaluateHardRisk(
             proposal: riskInput.proposal,
             limits: riskInput.limits,
             concentration,
+            portfolioCapital,
             proposedCapital: decision.approvedCapital,
         });
 

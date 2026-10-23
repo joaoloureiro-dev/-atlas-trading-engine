@@ -14,14 +14,8 @@ export const MAX_SNAPSHOT_AGE_MS = 60_000;
 const MAX_CLOCK_SKEW_MS = 5_000;
 
 /**
- * Gross exposure at or below this is float residue, not a position. A
- * portfolio this small counts as empty for percentage limits.
- */
-export const DUST_EXPOSURE = 1e-6;
-
-/**
- * Capacity smaller than this fraction of gross exposure is rounding residue
- * of a market sitting exactly at its limit, not room for a trade.
+ * Capacity smaller than this fraction of portfolio capital is rounding
+ * residue of a market sitting exactly at its limit, not room for a trade.
  */
 const DUST_CAPACITY_RATIO = 1e-9;
 
@@ -29,6 +23,14 @@ export interface EvaluateConcentrationInput {
     proposal: TradeProposal;
     limits: RiskLimits;
     concentration: PortfolioConcentration;
+
+    /**
+     * Total capital of the portfolio in its base currency. Concentration
+     * percentages are measured against it, not against current exposure, so
+     * they work the same for an empty, small or fully invested portfolio.
+     */
+    portfolioCapital: number;
+
     proposedCapital: number;
 }
 
@@ -50,6 +52,7 @@ export function evaluateConcentration(
         proposal,
         limits,
         concentration,
+        portfolioCapital,
         proposedCapital,
     } = structuredClone(input);
 
@@ -57,6 +60,7 @@ export function evaluateConcentration(
         proposal,
         limits,
         concentration,
+        portfolioCapital,
     );
 
     if (invalid) {
@@ -77,23 +81,13 @@ export function evaluateConcentration(
             (entry) => entry.market === market,
         )?.exposure ?? 0;
 
-    const projectedGrossExposure =
-        concentration.grossExposure + proposedCapital;
-
     const projectedMarketExposure =
         currentMarketExposure + proposedCapital;
 
     const projectedConcentrationPercentage =
-        (projectedMarketExposure / projectedGrossExposure) * 100;
-
-    // The first position of an empty portfolio is always 100% of it, so
-    // percentage limits only apply once the portfolio has exposure. Absolute
-    // market exposure limits still apply.
-    const hasExistingExposure =
-        concentration.grossExposure > DUST_EXPOSURE;
+        (projectedMarketExposure / portfolioCapital) * 100;
 
     if (
-        hasExistingExposure &&
         projectedConcentrationPercentage >
         limits.maxMarketConcentrationPercentage
     ) {
@@ -120,7 +114,6 @@ export function evaluateConcentration(
 
     if (
         marketLimit &&
-        hasExistingExposure &&
         projectedConcentrationPercentage >
         marketLimit.maxConcentrationPercentage
     ) {
@@ -147,12 +140,14 @@ export function calculateConcentrationCapacity(
         proposal,
         limits,
         concentration,
+        portfolioCapital,
     } = structuredClone(input);
 
     const invalid = validateConcentrationInputs(
         proposal,
         limits,
         concentration,
+        portfolioCapital,
     );
 
     if (invalid) {
@@ -160,7 +155,6 @@ export function calculateConcentrationCapacity(
     }
 
     const market = proposal.instrument.market;
-    const gross = concentration.grossExposure;
 
     const current =
         concentration.markets.find(
@@ -169,16 +163,9 @@ export function calculateConcentrationCapacity(
 
     const marketLimit = limits.marketLimits?.[market];
 
-    // Solves (current + x) / (gross + x) <= percentage / 100 for x.
-    const capacityAtPercentage = (percentage: number): number => {
-        const share = percentage / 100;
-
-        if (gross <= DUST_EXPOSURE || share >= 1) {
-            return Number.POSITIVE_INFINITY;
-        }
-
-        return Math.max(0, (share * gross - current) / (1 - share));
-    };
+    // Solves (current + x) / portfolioCapital <= percentage / 100 for x.
+    const capacityAtPercentage = (percentage: number): number =>
+        Math.max(0, (percentage / 100) * portfolioCapital - current);
 
     const maxCapital = Math.min(
         capacityAtPercentage(limits.maxMarketConcentrationPercentage),
@@ -190,7 +177,7 @@ export function calculateConcentrationCapacity(
             : Number.POSITIVE_INFINITY,
     );
 
-    if (maxCapital <= gross * DUST_CAPACITY_RATIO) {
+    if (maxCapital <= portfolioCapital * DUST_CAPACITY_RATIO) {
         return { approved: true, maxCapital: 0 };
     }
 
@@ -208,6 +195,7 @@ function validateConcentrationInputs(
     proposal: TradeProposal,
     limits: RiskLimits,
     concentration: PortfolioConcentration,
+    portfolioCapital: number,
 ): string | undefined {
     if (proposal.tenantId !== limits.tenantId) {
         throw new Error(
@@ -250,6 +238,14 @@ function validateConcentrationInputs(
         !MARKET_TYPES.includes(proposal.instrument.market)
     ) {
         return "Trade market is invalid.";
+    }
+
+    if (
+        typeof portfolioCapital !== "number" ||
+        !Number.isFinite(portfolioCapital) ||
+        portfolioCapital <= 0
+    ) {
+        return "Portfolio capital must be a positive finite number.";
     }
 
     const snapshotAge =

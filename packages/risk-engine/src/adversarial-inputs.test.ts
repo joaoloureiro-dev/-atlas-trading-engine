@@ -101,6 +101,7 @@ const hardRisk = (
         limits,
         portfolio,
         concentration,
+        portfolioCapital: 100_000,
         ...state,
         ...overrides,
     });
@@ -293,6 +294,7 @@ describe("concentration snapshot", () => {
     const crypto19kState = {
         ...state,
         currentGrossExposure: 20_000,
+        portfolioCapital: 20_000,
     };
 
     it("rejects the over-concentrated control case", () => {
@@ -616,6 +618,7 @@ describe("round 2", () => {
             },
             ...state,
             currentGrossExposure: 1_000,
+            portfolioCapital: 2_000,
         });
 
         expect(result.status).toBe("APPROVED");
@@ -675,6 +678,7 @@ describe("round 3", () => {
             },
             ...state,
             currentGrossExposure: 3_000,
+            portfolioCapital: 3_000,
         });
 
         expect(result.status).toBe("REJECTED");
@@ -739,6 +743,7 @@ describe("round 3", () => {
                 },
                 ...state,
                 currentGrossExposure: 10367.4 + 1978.27,
+                portfolioCapital: 1e10,
             });
 
             expect(result.status).toBe("APPROVED");
@@ -762,5 +767,137 @@ describe("round 3", () => {
         ["2026-01-01T00:00:00.123Z", Date.UTC(2026, 0, 1) + 123],
     ])("parses valid timestamp %s", (value, expected) => {
         expect(parseTimestamp(value)).toBe(expected);
+    });
+});
+
+describe("concentration measured against portfolio capital", () => {
+    it("does not lock a small portfolio", () => {
+        // One 0.01 position used to block every new trade at a 60% limit.
+        const result = hardRisk({
+            limits: {
+                ...limits,
+                maxPositionNotional: 1_000,
+                maxMarketConcentrationPercentage: 60,
+            },
+            concentration: {
+                ...concentration,
+                grossExposure: 0.01,
+                markets: [
+                    {
+                        market: "STOCKS",
+                        exposure: 0.01,
+                        percentageOfGrossExposure: 100,
+                    },
+                ],
+            },
+            portfolioCapital: 10_000,
+            ...state,
+            currentGrossExposure: 0.01,
+        });
+
+        expect(result.status).toBe("APPROVED");
+        expect(result.approvedCapital).toBeGreaterThan(999);
+    });
+
+    it("applies the percentage limit to the first trade", () => {
+        // 30% of 10,000 capital is the most a single market may hold.
+        const result = hardRisk({
+            limits: {
+                ...limits,
+                maxPositionNotional: 1_000_000,
+                maxMarketConcentrationPercentage: 30,
+            },
+            concentration: {
+                ...concentration,
+                grossExposure: 0,
+                markets: [],
+            },
+            portfolioCapital: 10_000,
+            ...state,
+            currentGrossExposure: 0,
+        });
+
+        expect(result.status).toBe("APPROVED");
+        expect(result.approvedCapital).toBeLessThanOrEqual(3_000);
+        expect(result.approvedCapital).toBeGreaterThan(2_999.99);
+    });
+
+    it.each([0, -1, NaN])("rejects portfolio capital %d", (portfolioCapital) => {
+        const result = hardRisk({ portfolioCapital });
+
+        expect(result.status).toBe("REJECTED");
+        expect(result.reasons).toContain(
+            "Portfolio capital must be a positive finite number.",
+        );
+    });
+
+    it("never approves past the capital-based limits across random inputs", () => {
+        let seed = 7;
+        let approvals = 0;
+        const random = () => {
+            seed = (seed * 16807) % 2147483647;
+            return seed / 2147483647;
+        };
+
+        for (let i = 0; i < 20_000; i++) {
+            const portfolioCapital = 1 + random() * 1e7;
+            const cryptoExposure = random() * portfolioCapital;
+            const stocksExposure = random() * portfolioCapital;
+            const gross = cryptoExposure + stocksExposure;
+            const percentage = random() * 100;
+            const marketPercentage = random() * 100;
+            const marketMaxExposure = random() * portfolioCapital;
+
+            const result = hardRisk({
+                limits: {
+                    ...limits,
+                    maxPositionNotional: 1e12,
+                    maxRiskPerTrade: 1e12,
+                    maxDailyLoss: 1e12,
+                    maxGrossExposure: 1e13,
+                    maxNetExposure: 1e13,
+                    maxMarketConcentrationPercentage: percentage,
+                    marketLimits: {
+                        CRYPTO: {
+                            maxExposure: marketMaxExposure,
+                            maxConcentrationPercentage: marketPercentage,
+                        },
+                    },
+                },
+                concentration: {
+                    ...concentration,
+                    grossExposure: gross,
+                    markets: [
+                        {
+                            market: "CRYPTO",
+                            exposure: cryptoExposure,
+                            percentageOfGrossExposure: 0,
+                        },
+                        {
+                            market: "STOCKS",
+                            exposure: stocksExposure,
+                            percentageOfGrossExposure: 0,
+                        },
+                    ],
+                },
+                portfolioCapital,
+                ...state,
+                currentGrossExposure: gross,
+            });
+
+            if (result.status === "APPROVED") {
+                approvals += 1;
+
+                const projected = cryptoExposure + result.approvedCapital;
+                const share = (projected / portfolioCapital) * 100;
+
+                expect(share).toBeLessThanOrEqual(percentage);
+                expect(share).toBeLessThanOrEqual(marketPercentage);
+                expect(projected).toBeLessThanOrEqual(marketMaxExposure);
+            }
+        }
+
+        // The property must be exercised, not skipped by rejecting everything.
+        expect(approvals).toBeGreaterThan(1_000);
     });
 });

@@ -10,6 +10,7 @@ export interface TradeProposal {
     id: string;
 
     tenantId: string;
+    portfolioId: string;
 
     agent: AgentType;
     instrument: Instrument;

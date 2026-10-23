@@ -1,14 +1,34 @@
-import type {
-    RiskDecision,
-    RiskLimits,
-    TradeProposal,
+import {
+    MARKET_TYPES,
+    TRADE_DIRECTIONS,
+    TRADING_MODES,
+    type Portfolio,
+    type RiskDecision,
+    type RiskLimits,
+    type TradeProposal,
 } from "@atlas/contracts";
+
+/**
+ * Longest window a proposal may be valid for, measured from its creation.
+ */
+export const MAX_PROPOSAL_TTL_MS = 15 * 60_000;
+
+/**
+ * Tolerated clock skew for proposal creation timestamps.
+ */
+const MAX_CLOCK_SKEW_MS = 5_000;
 
 export interface EvaluateRiskInput {
     decisionId: string;
 
     proposal: TradeProposal;
     limits: RiskLimits;
+
+    /**
+     * Trusted portfolio configuration. The trading mode always comes from
+     * here, never from the proposal.
+     */
+    portfolio: Portfolio;
 
     currentGrossExposure: number;
     currentNetExposure: number;
@@ -22,24 +42,29 @@ export interface EvaluateRiskInput {
 export function evaluateRisk(
     input: EvaluateRiskInput,
 ): RiskDecision {
+    // Copy the inputs once so getters or proxies cannot return one value
+    // during validation and a different one during sizing.
     const {
         decisionId,
         proposal,
         limits,
+        portfolio,
         currentGrossExposure,
         currentNetExposure,
         currentDailyPnl,
         currentDrawdownPercentage,
         currentOpenPositions,
-    } = input;
+    } = structuredClone(input);
 
-    const reject = (
-        reason: string,
-        stopLossPrice = proposal.invalidationPrice,
-    ): RiskDecision => ({
+    const reject = (reason: string): RiskDecision => ({
         id: decisionId,
         tenantId: proposal.tenantId,
+        portfolioId: proposal.portfolioId,
         tradeProposalId: proposal.id,
+
+        instrument: proposal.instrument,
+        direction: proposal.direction,
+        entryPrice: proposal.suggestedEntry ?? 0,
 
         status: "REJECTED",
 
@@ -47,19 +72,58 @@ export function evaluateRisk(
 
         maxLoss: 0,
 
-        stopLossPrice,
+        stopLossPrice: proposal.invalidationPrice,
 
-        tradingMode: proposal.tradingMode,
+        tradingMode: portfolio.tradingMode,
 
         reasons: [reason],
 
         createdAt: new Date().toISOString(),
+        expiresAt: proposal.expiresAt,
     });
 
     if (proposal.tenantId !== limits.tenantId) {
         throw new Error(
             "Risk evaluation received a proposal from another tenant.",
         );
+    }
+
+    if (
+        portfolio.tenantId !== limits.tenantId ||
+        portfolio.id !== limits.portfolioId
+    ) {
+        throw new Error(
+            "Risk limits do not belong to the supplied portfolio.",
+        );
+    }
+
+    if (proposal.portfolioId !== limits.portfolioId) {
+        throw new Error(
+            "Risk evaluation received a proposal for another portfolio.",
+        );
+    }
+
+    if (!TRADING_MODES.includes(portfolio.tradingMode)) {
+        return reject("Portfolio trading mode is invalid.");
+    }
+
+    if (proposal.tradingMode !== portfolio.tradingMode) {
+        return reject(
+            "Proposal trading mode does not match the portfolio trading mode.",
+        );
+    }
+
+    if (!TRADE_DIRECTIONS.includes(proposal.direction)) {
+        return reject("Trade direction must be LONG or SHORT.");
+    }
+
+    if (
+        !MARKET_TYPES.includes(proposal.instrument.market) ||
+        typeof proposal.instrument.symbol !== "string" ||
+        proposal.instrument.symbol.trim() === "" ||
+        proposal.instrument.symbol.trim() !== proposal.instrument.symbol
+    ) {
+        return reject("Trade instrument is invalid.");
     }
 
     const positiveLimits = [
@@ -108,10 +172,22 @@ export function evaluateRisk(
         );
     }
 
+    const now = Date.now();
+    const createdAt = Date.parse(proposal.createdAt);
     const expiresAt = Date.parse(proposal.expiresAt);
 
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
         return reject("Trade proposal has expired.");
+    }
+
+    if (
+        !Number.isFinite(createdAt) ||
+        createdAt > now + MAX_CLOCK_SKEW_MS ||
+        expiresAt - createdAt > MAX_PROPOSAL_TTL_MS
+    ) {
+        return reject(
+            "Trade proposal validity window is invalid or too long.",
+        );
     }
 
     if (
@@ -191,7 +267,7 @@ export function evaluateRisk(
         entryPrice - proposal.invalidationPrice,
     );
 
-    if (riskPerUnit <= 0) {
+    if (!Number.isFinite(riskPerUnit) || riskPerUnit <= 0) {
         return reject(
             "Trade risk per unit must be greater than zero.",
         );
@@ -223,7 +299,7 @@ export function evaluateRisk(
             : limits.maxNetExposure +
             currentNetExposure;
 
-    const approvedCapital = Math.min(
+    const capitalCap = Math.min(
         limits.maxPositionNotional,
         notionalByRisk,
         grossExposureHeadroom,
@@ -231,24 +307,54 @@ export function evaluateRisk(
     );
 
     if (
-        !Number.isFinite(approvedCapital) ||
-        approvedCapital <= 0
+        !Number.isFinite(capitalCap) ||
+        capitalCap <= 0
     ) {
         return reject(
             "No portfolio risk capacity is available for this trade.",
         );
     }
 
-    const approvedQuantity =
-        approvedCapital / entryPrice;
+    // Floating point division can land a hair above the caps, so shrink the
+    // quantity until both the capital and the loss stay within them.
+    const exceedsCaps = (quantity: number): boolean =>
+        quantity * entryPrice > capitalCap ||
+        quantity * riskPerUnit > riskBudget;
 
-    const maxLoss =
-        approvedQuantity * riskPerUnit;
+    let approvedQuantity = capitalCap / entryPrice;
+
+    for (
+        let attempt = 0;
+        attempt < 16 && exceedsCaps(approvedQuantity);
+        attempt++
+    ) {
+        approvedQuantity *= 1 - Number.EPSILON;
+    }
+
+    const approvedCapital = approvedQuantity * entryPrice;
+    const maxLoss = approvedQuantity * riskPerUnit;
+
+    if (
+        !Number.isFinite(approvedQuantity) ||
+        approvedQuantity <= 0 ||
+        approvedCapital <= 0 ||
+        maxLoss <= 0 ||
+        exceedsCaps(approvedQuantity)
+    ) {
+        return reject(
+            "Approved trade size is too small to execute.",
+        );
+    }
 
     return {
         id: decisionId,
         tenantId: proposal.tenantId,
+        portfolioId: proposal.portfolioId,
         tradeProposalId: proposal.id,
+
+        instrument: proposal.instrument,
+        direction: proposal.direction,
+        entryPrice,
 
         status: "APPROVED",
 
@@ -266,7 +372,7 @@ export function evaluateRisk(
             }
             : {}),
 
-        tradingMode: proposal.tradingMode,
+        tradingMode: portfolio.tradingMode,
 
         reasons: [
             "Hard risk checks passed.",
@@ -274,8 +380,10 @@ export function evaluateRisk(
         ],
 
         createdAt: new Date().toISOString(),
+        expiresAt: proposal.expiresAt,
     };
 }
+
 function isPositiveFinite(value: number): boolean {
     return Number.isFinite(value) && value > 0;
 }

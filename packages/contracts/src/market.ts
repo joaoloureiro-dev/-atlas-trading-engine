@@ -13,7 +13,9 @@ export const TRADING_MODES = ["PAPER", "SHADOW", "LIVE"] as const;
 
 export type TradingMode = (typeof TRADING_MODES)[number];
 
-export type TradeDirection = "LONG" | "SHORT";
+export const TRADE_DIRECTIONS = ["LONG", "SHORT"] as const;
+
+export type TradeDirection = (typeof TRADE_DIRECTIONS)[number];
 
 export interface Instrument {
     symbol: string;

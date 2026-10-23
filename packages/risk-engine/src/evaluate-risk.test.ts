@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+    Portfolio,
     RiskLimits,
     TradeProposal,
 } from "@atlas/contracts";
@@ -10,6 +11,7 @@ import { evaluateRisk } from "./evaluate-risk.js";
 const proposal: TradeProposal = {
     id: "proposal-1",
     tenantId: "tenant-1",
+    portfolioId: "portfolio-1",
     agent: "CRYPTO",
     instrument: {
         symbol: "BTC-USD",
@@ -36,6 +38,16 @@ const proposal: TradeProposal = {
     ).toISOString(),
 };
 
+
+const portfolio: Portfolio = {
+    id: "portfolio-1",
+    tenantId: "tenant-1",
+    name: "Test portfolio",
+    baseCurrency: "USD",
+    tradingMode: "PAPER",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+};
 const limits: RiskLimits = {
     tenantId: "tenant-1",
     portfolioId: "portfolio-1",
@@ -57,6 +69,7 @@ describe("evaluateRisk", () => {
     it("approves a valid trade and sizes it by risk", () => {
         const result = evaluateRisk({
             decisionId: "decision-1",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 0,
@@ -79,6 +92,7 @@ describe("evaluateRisk", () => {
     it("rejects when maximum daily loss is reached", () => {
         const result = evaluateRisk({
             decisionId: "decision-2",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 0,
@@ -97,6 +111,7 @@ describe("evaluateRisk", () => {
     it("rejects when maximum drawdown is reached", () => {
         const result = evaluateRisk({
             decisionId: "decision-3",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 0,
@@ -115,6 +130,7 @@ describe("evaluateRisk", () => {
     it("rejects when maximum gross exposure is reached", () => {
         const result = evaluateRisk({
             decisionId: "decision-4",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 10_000,
@@ -133,6 +149,7 @@ describe("evaluateRisk", () => {
     it("rejects when maximum net exposure is reached", () => {
         const result = evaluateRisk({
             decisionId: "decision-5",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 0,
@@ -151,6 +168,7 @@ describe("evaluateRisk", () => {
     it("approves a valid short trade and sizes it by risk", () => {
         const result = evaluateRisk({
             decisionId: "decision-6",
+            portfolio,
             proposal: {
                 ...proposal,
                 id: "proposal-short",
@@ -181,6 +199,7 @@ describe("evaluateRisk", () => {
         expect(() =>
             evaluateRisk({
                 decisionId: "decision-7",
+                portfolio,
                 proposal: {
                     ...proposal,
                     tenantId: "tenant-2",
@@ -200,6 +219,7 @@ describe("evaluateRisk", () => {
     it("rejects when suggested entry price is invalid", () => {
         const result = evaluateRisk({
             decisionId: "decision-8",
+            portfolio,
             proposal: {
                 ...proposal,
                 suggestedEntry: 0,
@@ -221,6 +241,7 @@ describe("evaluateRisk", () => {
     it("rejects a long trade with invalid stop placement", () => {
         const result = evaluateRisk({
             decisionId: "decision-9",
+            portfolio,
             proposal: {
                 ...proposal,
                 direction: "LONG",
@@ -244,6 +265,7 @@ describe("evaluateRisk", () => {
     it("rejects a short trade with invalid stop placement", () => {
         const result = evaluateRisk({
             decisionId: "decision-10",
+            portfolio,
             proposal: {
                 ...proposal,
                 direction: "SHORT",
@@ -267,6 +289,7 @@ describe("evaluateRisk", () => {
     it("rejects when maximum number of open positions is reached", () => {
         const result = evaluateRisk({
             decisionId: "decision-11",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 0,
@@ -285,6 +308,7 @@ describe("evaluateRisk", () => {
     it("rejects an invalid open position count", () => {
         const result = evaluateRisk({
             decisionId: "decision-12",
+            portfolio,
             proposal,
             limits,
             currentGrossExposure: 0,
@@ -320,6 +344,7 @@ describe("evaluateRisk", () => {
         (field, value) => {
             const result = evaluateRisk({
                 decisionId: "decision-13",
+                portfolio,
                 proposal,
                 limits,
                 ...validState,
@@ -349,6 +374,7 @@ describe("evaluateRisk", () => {
         (field, value) => {
             const result = evaluateRisk({
                 decisionId: "decision-14",
+                portfolio,
                 proposal,
                 limits: {
                     ...limits,
@@ -367,6 +393,7 @@ describe("evaluateRisk", () => {
     it("rejects an invalid maximum open positions limit", () => {
         const result = evaluateRisk({
             decisionId: "decision-15",
+            portfolio,
             proposal,
             limits: {
                 ...limits,
@@ -385,6 +412,7 @@ describe("evaluateRisk", () => {
     it("rejects an expired proposal", () => {
         const result = evaluateRisk({
             decisionId: "decision-16",
+            portfolio,
             proposal: {
                 ...proposal,
                 expiresAt: new Date(
@@ -404,6 +432,7 @@ describe("evaluateRisk", () => {
     it("rejects a proposal with an invalid expiry", () => {
         const result = evaluateRisk({
             decisionId: "decision-17",
+            portfolio,
             proposal: {
                 ...proposal,
                 expiresAt: "not-a-date",
@@ -421,6 +450,7 @@ describe("evaluateRisk", () => {
     it("caps trade risk at the remaining daily loss allowance", () => {
         const result = evaluateRisk({
             decisionId: "decision-18",
+            portfolio,
             proposal,
             limits,
             ...validState,

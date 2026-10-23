@@ -11,6 +11,7 @@ import { evaluateConcentration } from "./evaluate-concentration.js";
 const proposal: TradeProposal = {
     id: "proposal-1",
     tenantId: "tenant-1",
+    portfolioId: "portfolio-1",
     agent: "CRYPTO",
     instrument: {
         symbol: "BTC-USD",

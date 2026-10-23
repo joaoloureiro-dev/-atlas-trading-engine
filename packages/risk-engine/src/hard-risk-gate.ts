@@ -1,4 +1,5 @@
 import type {
+    Portfolio,
     PortfolioConcentration,
     RiskDecision,
     RiskLimits,
@@ -6,6 +7,7 @@ import type {
 } from "@atlas/contracts";
 
 import {
+    approximatelyEqual,
     evaluateConcentration,
 } from "./evaluate-concentration.js";
 import {
@@ -17,6 +19,7 @@ export interface EvaluateHardRiskInput {
 
     proposal: TradeProposal;
     limits: RiskLimits;
+    portfolio: Portfolio;
 
     concentration: PortfolioConcentration;
 
@@ -32,47 +35,27 @@ export interface EvaluateHardRiskInput {
 export function evaluateHardRisk(
     input: EvaluateHardRiskInput,
 ): RiskDecision {
+    // Copy the inputs once so every check below sees the same values.
     const {
-        decisionId,
-        proposal,
-        limits,
         concentration,
-        currentGrossExposure,
-        currentNetExposure,
-        currentDailyPnl,
-        currentDrawdownPercentage,
-        currentOpenPositions,
-    } = input;
+        ...riskInput
+    } = structuredClone(input);
 
-    const baseDecision = evaluateRisk({
-        decisionId,
-        proposal,
-        limits,
-        currentGrossExposure,
-        currentNetExposure,
-        currentDailyPnl,
-        currentDrawdownPercentage,
-        currentOpenPositions,
-    });
+    const baseDecision = evaluateRisk(riskInput);
 
     if (baseDecision.status !== "APPROVED") {
         return baseDecision;
     }
 
-    const concentrationDecision =
-        evaluateConcentration({
-            proposal,
-            limits,
-            concentration,
-            proposedCapital:
-                baseDecision.approvedCapital,
-        });
+    const reject = (reason: string): RiskDecision => {
+        const {
+            approvedQuantity: _approvedQuantity,
+            takeProfitPrice: _takeProfitPrice,
+            ...decision
+        } = baseDecision;
 
-    if (!concentrationDecision.approved) {
         return {
-            id: decisionId,
-            tenantId: proposal.tenantId,
-            tradeProposalId: proposal.id,
+            ...decision,
 
             status: "REJECTED",
 
@@ -80,20 +63,36 @@ export function evaluateHardRisk(
 
             maxLoss: 0,
 
-            stopLossPrice:
-                proposal.invalidationPrice,
-
-            tradingMode:
-                proposal.tradingMode,
-
-            reasons: [
-                concentrationDecision.reason ??
-                "Portfolio concentration risk check failed.",
-            ],
-
-            createdAt:
-                new Date().toISOString(),
+            reasons: [reason],
         };
+    };
+
+    // Two sources for the same number must agree, or one of them is wrong.
+    if (
+        !approximatelyEqual(
+            concentration.grossExposure,
+            riskInput.currentGrossExposure,
+        )
+    ) {
+        return reject(
+            "Concentration snapshot does not match the current gross exposure.",
+        );
+    }
+
+    const concentrationDecision =
+        evaluateConcentration({
+            proposal: riskInput.proposal,
+            limits: riskInput.limits,
+            concentration,
+            proposedCapital:
+                baseDecision.approvedCapital,
+        });
+
+    if (!concentrationDecision.approved) {
+        return reject(
+            concentrationDecision.reason ??
+            "Portfolio concentration risk check failed.",
+        );
     }
 
     return {

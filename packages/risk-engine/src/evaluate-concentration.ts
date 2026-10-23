@@ -1,8 +1,16 @@
-import type {
-    PortfolioConcentration,
-    RiskLimits,
-    TradeProposal,
+import {
+    MARKET_TYPES,
+    type PortfolioConcentration,
+    type RiskLimits,
+    type TradeProposal,
 } from "@atlas/contracts";
+
+/**
+ * Oldest concentration snapshot accepted for a risk decision.
+ */
+export const MAX_SNAPSHOT_AGE_MS = 60_000;
+
+const MAX_CLOCK_SKEW_MS = 5_000;
 
 export interface EvaluateConcentrationInput {
     proposal: TradeProposal;
@@ -19,12 +27,14 @@ export interface ConcentrationDecision {
 export function evaluateConcentration(
     input: EvaluateConcentrationInput,
 ): ConcentrationDecision {
+    // Copy the inputs once so getters or proxies cannot change values
+    // between validation and use.
     const {
         proposal,
         limits,
         concentration,
         proposedCapital,
-    } = input;
+    } = structuredClone(input);
 
     if (proposal.tenantId !== limits.tenantId) {
         throw new Error(
@@ -42,6 +52,33 @@ export function evaluateConcentration(
         throw new Error(
             "Concentration snapshot belongs to another portfolio.",
         );
+    }
+
+    if (proposal.portfolioId !== limits.portfolioId) {
+        throw new Error(
+            "Concentration evaluation received a proposal for another portfolio.",
+        );
+    }
+
+    if (!MARKET_TYPES.includes(proposal.instrument.market)) {
+        return {
+            approved: false,
+            reason: "Trade market is invalid.",
+        };
+    }
+
+    const snapshotAge =
+        Date.now() - Date.parse(concentration.calculatedAt);
+
+    if (
+        !Number.isFinite(snapshotAge) ||
+        snapshotAge > MAX_SNAPSHOT_AGE_MS ||
+        snapshotAge < -MAX_CLOCK_SKEW_MS
+    ) {
+        return {
+            approved: false,
+            reason: "Concentration snapshot is missing a valid recent timestamp.",
+        };
     }
 
     if (!Number.isFinite(proposedCapital) || proposedCapital <= 0) {
@@ -77,6 +114,37 @@ export function evaluateConcentration(
         };
     }
 
+    const markets = concentration.markets.map(
+        ({ market }) => market,
+    );
+
+    if (
+        !markets.every((market) => MARKET_TYPES.includes(market)) ||
+        new Set(markets).size !== markets.length
+    ) {
+        return {
+            approved: false,
+            reason: "Concentration snapshot markets must be valid and unique.",
+        };
+    }
+
+    const marketExposureTotal = concentration.markets.reduce(
+        (total, { exposure }) => total + exposure,
+        0,
+    );
+
+    if (
+        !approximatelyEqual(
+            marketExposureTotal,
+            concentration.grossExposure,
+        )
+    ) {
+        return {
+            approved: false,
+            reason: "Concentration snapshot gross exposure does not match its markets.",
+        };
+    }
+
     const currentMarketExposure =
         concentration.markets.find(
             ({ market }) =>
@@ -97,7 +165,13 @@ export function evaluateConcentration(
                 projectedGrossExposure
             ) * 100;
 
+    // The first position of an empty portfolio is always 100% of it, so
+    // percentage limits only apply once the portfolio has exposure. Absolute
+    // market exposure limits still apply.
+    const hasExistingExposure = concentration.grossExposure > 0;
+
     if (
+        hasExistingExposure &&
         projectedConcentrationPercentage >
         limits.maxMarketConcentrationPercentage
     ) {
@@ -142,6 +216,7 @@ export function evaluateConcentration(
 
     if (
         marketLimit &&
+        hasExistingExposure &&
         projectedConcentrationPercentage >
         marketLimit.maxConcentrationPercentage
     ) {
@@ -155,4 +230,8 @@ export function evaluateConcentration(
     return {
         approved: true,
     };
+}
+
+export function approximatelyEqual(a: number, b: number): boolean {
+    return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 }

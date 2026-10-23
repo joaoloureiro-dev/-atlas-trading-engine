@@ -8,6 +8,7 @@ import type {
 
 import {
     approximatelyEqual,
+    calculateConcentrationCapacity,
     evaluateConcentration,
 } from "./evaluate-concentration.js";
 import {
@@ -67,6 +68,13 @@ export function evaluateHardRisk(
         };
     };
 
+    if (
+        typeof concentration !== "object" ||
+        concentration === null
+    ) {
+        return reject("Concentration snapshot is malformed.");
+    }
+
     // Two sources for the same number must agree, or one of them is wrong.
     if (
         !approximatelyEqual(
@@ -79,13 +87,44 @@ export function evaluateHardRisk(
         );
     }
 
+    const capacity = calculateConcentrationCapacity({
+        proposal: riskInput.proposal,
+        limits: riskInput.limits,
+        concentration,
+    });
+
+    if (!capacity.approved) {
+        return reject(capacity.reason);
+    }
+
+    if (capacity.maxCapital <= 0) {
+        return reject(
+            "Maximum market concentration would be exceeded.",
+        );
+    }
+
+    // Size the trade down to what the concentration limits allow instead of
+    // rejecting it outright.
+    const decision =
+        capacity.maxCapital < baseDecision.approvedCapital
+            ? evaluateRisk({
+                ...riskInput,
+                maxCapitalByConcentration: capacity.maxCapital,
+            })
+            : baseDecision;
+
+    if (decision.status !== "APPROVED") {
+        return decision;
+    }
+
+    // Defence in depth: the sized trade must pass the concentration checks.
     const concentrationDecision =
         evaluateConcentration({
             proposal: riskInput.proposal,
             limits: riskInput.limits,
             concentration,
             proposedCapital:
-                baseDecision.approvedCapital,
+                decision.approvedCapital,
         });
 
     if (!concentrationDecision.approved) {
@@ -96,10 +135,15 @@ export function evaluateHardRisk(
     }
 
     return {
-        ...baseDecision,
+        ...decision,
 
         reasons: [
-            ...baseDecision.reasons,
+            ...decision.reasons,
+            ...(decision === baseDecision
+                ? []
+                : [
+                    "Position size was reduced to fit market concentration limits.",
+                ]),
             "Market concentration checks passed.",
         ],
     };

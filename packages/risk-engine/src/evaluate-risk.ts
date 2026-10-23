@@ -2,6 +2,7 @@ import {
     MARKET_TYPES,
     TRADE_DIRECTIONS,
     TRADING_MODES,
+    parseTimestamp,
     type Portfolio,
     type RiskDecision,
     type RiskLimits,
@@ -37,6 +38,12 @@ export interface EvaluateRiskInput {
     currentDrawdownPercentage: number;
 
     currentOpenPositions: number;
+
+    /**
+     * Largest capital the portfolio's concentration limits allow for this
+     * trade. The trade is sized down to fit instead of being rejected.
+     */
+    maxCapitalByConcentration?: number;
 }
 
 export function evaluateRisk(
@@ -54,6 +61,7 @@ export function evaluateRisk(
         currentDailyPnl,
         currentDrawdownPercentage,
         currentOpenPositions,
+        maxCapitalByConcentration = Number.POSITIVE_INFINITY,
     } = structuredClone(input);
 
     const reject = (reason: string): RiskDecision => ({
@@ -118,6 +126,8 @@ export function evaluateRisk(
     }
 
     if (
+        typeof proposal.instrument !== "object" ||
+        proposal.instrument === null ||
         !MARKET_TYPES.includes(proposal.instrument.market) ||
         typeof proposal.instrument.symbol !== "string" ||
         proposal.instrument.symbol.trim() === "" ||
@@ -173,8 +183,8 @@ export function evaluateRisk(
     }
 
     const now = Date.now();
-    const createdAt = Date.parse(proposal.createdAt);
-    const expiresAt = Date.parse(proposal.expiresAt);
+    const createdAt = parseTimestamp(proposal.createdAt);
+    const expiresAt = parseTimestamp(proposal.expiresAt);
 
     if (!Number.isFinite(expiresAt) || expiresAt <= now) {
         return reject("Trade proposal has expired.");
@@ -218,9 +228,24 @@ export function evaluateRisk(
     }
 
     if (
-        Math.abs(currentNetExposure) >=
-        limits.maxNetExposure
+        Number.isNaN(maxCapitalByConcentration) ||
+        maxCapitalByConcentration < 0
     ) {
+        return reject(
+            "Concentration capital limit must be a non-negative number.",
+        );
+    }
+
+    // A trade that reduces net exposure is allowed even when net exposure is
+    // at its limit, so the check depends on the direction.
+    const netExposureHeadroom =
+        proposal.direction === "LONG"
+            ? limits.maxNetExposure -
+            currentNetExposure
+            : limits.maxNetExposure +
+            currentNetExposure;
+
+    if (netExposureHeadroom <= 0) {
         return reject("Maximum net exposure reached.");
     }
 
@@ -292,18 +317,12 @@ export function evaluateRisk(
         limits.maxGrossExposure -
         currentGrossExposure;
 
-    const netExposureHeadroom =
-        proposal.direction === "LONG"
-            ? limits.maxNetExposure -
-            currentNetExposure
-            : limits.maxNetExposure +
-            currentNetExposure;
-
     const capitalCap = Math.min(
         limits.maxPositionNotional,
         notionalByRisk,
         grossExposureHeadroom,
         netExposureHeadroom,
+        maxCapitalByConcentration,
     );
 
     if (
@@ -380,7 +399,7 @@ export function evaluateRisk(
         ],
 
         createdAt: new Date().toISOString(),
-        expiresAt: proposal.expiresAt,
+        expiresAt: new Date(expiresAt).toISOString(),
     };
 }
 

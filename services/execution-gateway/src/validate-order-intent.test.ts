@@ -10,7 +10,15 @@ import { validateOrderIntent } from "./validate-order-intent.js";
 const riskDecision: RiskDecision = {
     id: "risk-1",
     tenantId: "tenant-1",
+    portfolioId: "portfolio-1",
     tradeProposalId: "proposal-1",
+
+    instrument: {
+        symbol: "BTC-USD",
+        market: "CRYPTO",
+    },
+    direction: "LONG",
+    entryPrice: 100,
 
     status: "APPROVED",
 
@@ -29,6 +37,9 @@ const riskDecision: RiskDecision = {
     ],
 
     createdAt: new Date().toISOString(),
+    expiresAt: new Date(
+        Date.now() + 60_000,
+    ).toISOString(),
 };
 
 const orderIntent: OrderIntent = {
@@ -50,6 +61,8 @@ const orderIntent: OrderIntent = {
 
     orderType: "MARKET",
 
+    limitPrice: 100.5,
+
     tradingMode: "PAPER",
 
     idempotencyKey: "tenant-1:order-1",
@@ -57,9 +70,15 @@ const orderIntent: OrderIntent = {
     createdAt: new Date().toISOString(),
 };
 
+const {
+    limitPrice: _limitPrice,
+    ...orderIntentWithoutPrices
+} = orderIntent;
+
 describe("validateOrderIntent", () => {
     it("accepts a valid order intent", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent,
             riskDecision,
         });
@@ -89,6 +108,7 @@ describe("validateOrderIntent", () => {
         };
 
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent,
             riskDecision: rejectedDecision,
         });
@@ -100,12 +120,13 @@ describe("validateOrderIntent", () => {
         );
 
         expect(result.reasons).toContain(
-            "Risk decision does not contain an approved quantity.",
+            "Risk decision does not contain a valid approved quantity.",
         );
     });
 
     it("rejects quantity above the approved risk quantity", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
                 ...orderIntent,
                 quantity: 11,
@@ -123,6 +144,7 @@ describe("validateOrderIntent", () => {
     it("throws on cross-tenant execution", () => {
         expect(() =>
             validateOrderIntent({
+                reservedQuantity: 0,
                 orderIntent: {
                     ...orderIntent,
                     tenantId: "tenant-2",
@@ -136,6 +158,7 @@ describe("validateOrderIntent", () => {
 
     it("rejects a missing idempotency key", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
                 ...orderIntent,
                 idempotencyKey: " ",
@@ -152,8 +175,9 @@ describe("validateOrderIntent", () => {
 
     it("rejects a limit order without a valid limit price", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
-                ...orderIntent,
+                ...orderIntentWithoutPrices,
                 orderType: "LIMIT",
             },
             riskDecision,
@@ -168,8 +192,9 @@ describe("validateOrderIntent", () => {
 
     it("rejects a stop order without a valid stop price", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
-                ...orderIntent,
+                ...orderIntentWithoutPrices,
                 orderType: "STOP",
             },
             riskDecision,
@@ -184,10 +209,11 @@ describe("validateOrderIntent", () => {
 
     it("rejects a stop-limit order without both prices", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
-                ...orderIntent,
+                ...orderIntentWithoutPrices,
                 orderType: "STOP_LIMIT",
-                stopPrice: 95,
+                stopPrice: 99,
             },
             riskDecision,
         });
@@ -201,6 +227,7 @@ describe("validateOrderIntent", () => {
 
     it("rejects an order referencing another risk decision", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
                 ...orderIntent,
                 riskDecisionId: "risk-2",
@@ -217,6 +244,7 @@ describe("validateOrderIntent", () => {
 
     it("rejects an order for another trade proposal", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
                 ...orderIntent,
                 tradeProposalId: "proposal-2",
@@ -233,6 +261,7 @@ describe("validateOrderIntent", () => {
 
     it("rejects a trading mode mismatch", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
                 ...orderIntent,
                 tradingMode: "LIVE",
@@ -249,6 +278,7 @@ describe("validateOrderIntent", () => {
 
     it("rejects a non-positive order quantity", () => {
         const result = validateOrderIntent({
+            reservedQuantity: 0,
             orderIntent: {
                 ...orderIntent,
                 quantity: 0,

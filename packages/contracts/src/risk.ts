@@ -1,4 +1,8 @@
-import type { TradingMode } from "./market.js";
+import type {
+    Instrument,
+    TradeDirection,
+    TradingMode,
+} from "./market.js";
 
 export type RiskDecisionStatus =
     | "APPROVED"
@@ -9,7 +13,15 @@ export interface RiskDecision {
     id: string;
 
     tenantId: string;
+    portfolioId: string;
     tradeProposalId: string;
+
+    /**
+     * What was approved. Execution must match these exactly.
+     */
+    instrument: Instrument;
+    direction: TradeDirection;
+    entryPrice: number;
 
     status: RiskDecisionStatus;
 
@@ -26,4 +38,9 @@ export interface RiskDecision {
     reasons: string[];
 
     createdAt: string;
+
+    /**
+     * The decision must not be executed after this time.
+     */
+    expiresAt: string;
 }

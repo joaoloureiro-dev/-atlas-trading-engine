@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+    Portfolio,
     PortfolioConcentration,
     RiskLimits,
     TradeProposal,
@@ -11,6 +12,7 @@ import { evaluateHardRisk } from "./hard-risk-gate.js";
 const proposal: TradeProposal = {
     id: "proposal-1",
     tenantId: "tenant-1",
+    portfolioId: "portfolio-1",
     agent: "CRYPTO",
     instrument: {
         symbol: "BTC-USD",
@@ -37,6 +39,16 @@ const proposal: TradeProposal = {
     ).toISOString(),
 };
 
+
+const portfolio: Portfolio = {
+    id: "portfolio-1",
+    tenantId: "tenant-1",
+    name: "Test portfolio",
+    baseCurrency: "USD",
+    tradingMode: "PAPER",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+};
 const limits: RiskLimits = {
     tenantId: "tenant-1",
     portfolioId: "portfolio-1",
@@ -75,6 +87,7 @@ describe("evaluateHardRisk", () => {
     it("approves when all hard risk checks pass", () => {
         const result = evaluateHardRisk({
             decisionId: "decision-1",
+            portfolio,
             proposal,
             limits,
             concentration,
@@ -96,6 +109,7 @@ describe("evaluateHardRisk", () => {
     it("stops immediately when base risk checks fail", () => {
         const result = evaluateHardRisk({
             decisionId: "decision-2",
+            portfolio,
             proposal,
             limits,
             concentration,
@@ -115,6 +129,7 @@ describe("evaluateHardRisk", () => {
     it("rejects when projected concentration exceeds the limit", () => {
         const result = evaluateHardRisk({
             decisionId: "decision-3",
+            portfolio,
             proposal,
             limits: {
                 ...limits,
@@ -139,6 +154,7 @@ describe("evaluateHardRisk", () => {
     it("rejects when market-specific exposure would be exceeded", () => {
         const result = evaluateHardRisk({
             decisionId: "decision-4",
+            portfolio,
             proposal,
             limits: {
                 ...limits,

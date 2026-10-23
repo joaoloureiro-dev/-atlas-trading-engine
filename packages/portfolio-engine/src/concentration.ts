@@ -4,6 +4,8 @@ import type {
     PortfolioPosition,
 } from "@atlas/contracts";
 
+import { positionMarkPrice } from "./mark-price.js";
+
 export interface CalculatePortfolioConcentrationInput {
     tenantId: string;
     portfolioId: string;
@@ -25,9 +27,7 @@ export function calculatePortfolioConcentration(
             );
         }
 
-        const price =
-            position.currentPrice ??
-            position.averageEntryPrice;
+        const price = positionMarkPrice(position);
 
         const exposure = Math.abs(
             position.quantity * price,

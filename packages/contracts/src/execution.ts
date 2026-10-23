@@ -4,11 +4,14 @@ import type {
     TradingMode,
 } from "./market.js";
 
-export type OrderType =
-    | "MARKET"
-    | "LIMIT"
-    | "STOP"
-    | "STOP_LIMIT";
+export const ORDER_TYPES = [
+    "MARKET",
+    "LIMIT",
+    "STOP",
+    "STOP_LIMIT",
+] as const;
+
+export type OrderType = (typeof ORDER_TYPES)[number];
 
 export interface OrderIntent {
     id: string;
@@ -25,6 +28,10 @@ export interface OrderIntent {
 
     orderType: OrderType;
 
+    /**
+     * For MARKET orders this is the worst acceptable fill price and is
+     * required, so a market order can never fill without a price bound.
+     */
     limitPrice?: number;
     stopPrice?: number;
 

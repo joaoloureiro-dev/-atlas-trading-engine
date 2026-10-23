@@ -13,6 +13,18 @@ export const MAX_SNAPSHOT_AGE_MS = 60_000;
 
 const MAX_CLOCK_SKEW_MS = 5_000;
 
+/**
+ * Gross exposure at or below this is float residue, not a position. A
+ * portfolio this small counts as empty for percentage limits.
+ */
+export const DUST_EXPOSURE = 1e-6;
+
+/**
+ * Capacity smaller than this fraction of gross exposure is rounding residue
+ * of a market sitting exactly at its limit, not room for a trade.
+ */
+const DUST_CAPACITY_RATIO = 1e-9;
+
 export interface EvaluateConcentrationInput {
     proposal: TradeProposal;
     limits: RiskLimits;
@@ -77,7 +89,8 @@ export function evaluateConcentration(
     // The first position of an empty portfolio is always 100% of it, so
     // percentage limits only apply once the portfolio has exposure. Absolute
     // market exposure limits still apply.
-    const hasExistingExposure = concentration.grossExposure > 0;
+    const hasExistingExposure =
+        concentration.grossExposure > DUST_EXPOSURE;
 
     if (
         hasExistingExposure &&
@@ -160,7 +173,7 @@ export function calculateConcentrationCapacity(
     const capacityAtPercentage = (percentage: number): number => {
         const share = percentage / 100;
 
-        if (gross === 0 || share >= 1) {
+        if (gross <= DUST_EXPOSURE || share >= 1) {
             return Number.POSITIVE_INFINITY;
         }
 
@@ -176,6 +189,10 @@ export function calculateConcentrationCapacity(
             ? capacityAtPercentage(marketLimit.maxConcentrationPercentage)
             : Number.POSITIVE_INFINITY,
     );
+
+    if (maxCapital <= gross * DUST_CAPACITY_RATIO) {
+        return { approved: true, maxCapital: 0 };
+    }
 
     // Leave a sliver of room so rounding cannot push a trade sized exactly
     // to the limit over it.

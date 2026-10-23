@@ -25,7 +25,7 @@ Sem segredos reais no histórico git. `.gitignore` cobre `.env*`, chaves e certi
 | A-09 | Baixa | Aberto | `sql/rls.sql` está desatualizado (`app.current_"tenantId"`) e diverge da migração |
 | A-10 | Baixa | Resolvido (revisão #2) | `npm audit`: 4 vulnerabilidades altas na CLI `prisma` (dev; `mysql2`, `deepmerge-ts`) |
 | A-11 | Baixa | Aberto | `.env.example` define `DATABASE_URL` duas vezes |
-| A-12 | Info | Parcial (há testes unitários; falta CI e testes de RLS) | Sem CI, sem testes de isolamento entre tenants, sem `SECURITY.md` |
+| A-12 | Info | Parcial (CI com build, typecheck, testes e audit; faltam testes de RLS e secret scanning) | Sem CI, sem testes de isolamento entre tenants, sem `SECURITY.md` |
 
 ### Detalhe
 
